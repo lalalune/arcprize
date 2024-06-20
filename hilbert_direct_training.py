@@ -333,7 +333,7 @@ def save_to_file(data, file_path):
         for examples in data:
             for example in examples:
                 input_example, output_example = example
-                f.write(' '.join(map(str, input_example)) + '\t' + ' '.join(map(str, output_example)) + '\n')
+                f.write(' '.join(map(str, input_example)) + ' '.join(map(str, output_example)) + '\n')
 
 save_to_file(padded_train_data, 'padded_train_data.txt')
 save_to_file(padded_test_data, 'padded_test_data.txt')
