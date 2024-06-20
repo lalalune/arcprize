@@ -1,7 +1,9 @@
 from pathlib import Path
 import numpy as np
 import torch
-import numpy as np
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+import torch.optim as optim
 
 padded_test_data = []
 with open('padded_test_data.txt', 'r') as f:
@@ -21,11 +23,6 @@ with open('padded_train_data.txt', 'r') as f:
             tokens[i] = int(tokens[i])
         input_example = np.array(tokens, dtype=np.int64)
         padded_train_data.append(input_example)
-
-import torch.nn as nn
-
-from torch.utils.data import DataLoader, TensorDataset
-import torch.optim as optim
 
 class TransformerModel(nn.Module):
     def __init__(self, num_tokens, d_model, nhead, dim_feedforward, num_layers, device):
