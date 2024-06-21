@@ -56,7 +56,7 @@ class WeightedCrossEntropyLoss(nn.Module):
         self.zero_weight = zero_weight
 
     def forward(self, input, target):
-        input = input.view(-1, self.num_classes + 1)
+        input = input.view(-1, self.num_classes + 1).float()  # Ensure input is float
         target = target.view(-1)
 
         log_probs = F.log_softmax(input, dim=1)
@@ -104,39 +104,23 @@ train_loader = DataLoader(
 )
 
 
-def train_step(
-    model, src, tgt, src_lengths, tgt_lengths, criterion, teacher_forcing_ratio=1.0
-):
+def train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, teacher_forcing_ratio=1.0):
     batch_size, max_len = tgt.shape
+    
+    with autocast(enabled=use_amp):
+        logits = model(src)  # Assuming model now outputs logits directly
+        
+        logits = logits[:, :tgt.size(1), :]  # Ensure logits are the same length as targets
+        
+        # Flatten for cross-entropy loss
+        logits = logits.view(-1, NUM_TOKENS + 1)  # Reshape to [batch_size * sequence_length, NUM_TOKENS + 1]
+        tgt = tgt.view(-1)  # Flatten target
+        
+        # Calculate loss
+        loss = criterion(logits, tgt)
 
-    decoder_input = torch.full(
-        (batch_size, 1), START_SEQUENCE_TOKEN, dtype=torch.long
-    ).to(device)
+    return logits, loss
 
-    outputs = []
-
-    for t in range(1, min(max_len, max_prediction_length)):
-        with autocast(enabled=use_amp):
-            output = model(
-                src,
-                decoder_input,
-                src_lengths,
-                torch.tensor([t] * batch_size).to(device),
-            )
-
-            outputs.append(output[:, -1, :])
-
-            teacher_force = random.random() < teacher_forcing_ratio
-            top1 = output[:, -1, :].max(1)[1]
-            next_token = tgt[:, t] if teacher_force else top1
-            decoder_input = torch.cat([decoder_input, next_token.unsqueeze(1)], dim=1)
-
-            if (next_token == END_SEQUENCE_TOKEN).all():
-                break
-
-    outputs = torch.stack(outputs, dim=1)
-
-    return outputs
 
 
 # Training loop
@@ -151,9 +135,7 @@ for epoch in range(start_epoch, num_epochs):
         src_lengths, tgt_lengths = src_lengths.to(device), tgt_lengths.to(device)
 
         with autocast(enabled=use_amp):
-            outputs = train_step(model, src, tgt, src_lengths, tgt_lengths, criterion)
-            tgt = tgt[:, 1 : outputs.size(1) + 1]
-            loss = criterion(outputs, tgt)
+            generated_ids, loss = train_step(model, src, tgt, src_lengths, tgt_lengths, criterion)
 
         scaler.scale(loss).backward()
 
@@ -165,6 +147,7 @@ for epoch in range(start_epoch, num_epochs):
         total_loss += loss.item()
 
         print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
+
         if batch_idx % 100 == 0:
             torch.save(
                 {
