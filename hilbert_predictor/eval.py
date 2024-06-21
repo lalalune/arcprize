@@ -1,14 +1,16 @@
+import os
+import csv
+
 from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from matplotlib import pyplot as plt
-from .gilbert2d import unflatten_1d_to_2d, gilbert2d
+from matplotlib.colors import ListedColormap
 
+from .gilbert2d import unflatten_1d_to_2d, gilbert2d
 from .data import load_data, padded_train_data, padded_test_data, evaluating_file_paths
 from .model import TransformerModel, model, checkpoint_path, num_context_tokens, num_pred_tokens
-from matplotlib.colors import ListedColormap
-import os
 
 num_tokens = 10
 # Assuming `padded_train_data` is already loaded and preprocessed
@@ -55,9 +57,6 @@ def evaluate(model, loader, device):
     
     accuracy = total_correct / total_tokens
     return accuracy
-
-import csv
-import numpy as np
 
 def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames):
     test_inputs = np.array(padded_test_data)
@@ -142,9 +141,9 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
     completely_correct_percentage = (completely_correct / total_predictions) * 100 if total_predictions > 0 else 0
 
     print(f"Overall Accuracy: {overall_accuracy:.4f}")
-    print(f"Overall Accuracy (Zeros removed): {overall_non_zero_accuracy:.4f}")
+    print(f"Overall Non-Zero Accuracy: {overall_non_zero_accuracy:.4f}")
     print(f"Total Correct Predictions: {total_correct} out of {total_tokens}")
-    print(f"Total Correct Predictions Zeros removed): {total_non_zero_correct} out of {total_non_zero_tokens}")
+    print(f"Total Non-Zero Correct Predictions: {total_non_zero_correct} out of {total_non_zero_tokens}")
     print(f"Completely Correct Predictions: {completely_correct} out of {total_predictions}")
     print(f"Percentage of Completely Correct Predictions: {completely_correct_percentage:.2f}%")
 
