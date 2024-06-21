@@ -11,6 +11,15 @@ from .model import (
     checkpoint_path,
     max_context_length,
     max_prediction_length,
+    d_model,
+    nhead,
+    num_layers,
+    dim_feedforward,
+    max_seq_length,
+    max_context_length,
+    max_prediction_length,
+    dropout_rate,
+    device
 )
 from .data import (
     NUM_TOKENS,
@@ -20,7 +29,7 @@ from .data import (
     training_data,
 )
 from torch.cuda.amp import autocast, GradScaler
-
+import wandb
 batch_size = 1
 if torch.cuda.is_available():
     batch_size = 128
@@ -70,10 +79,6 @@ class WeightedCrossEntropyLoss(nn.Module):
         return loss.sum() / non_ignored_mask.sum()
 
 
-criterion = WeightedCrossEntropyLoss(
-    num_classes=NUM_TOKENS, ignore_index=PAD_TOKEN, zero_weight=0.1
-)
-
 
 def collate_fn(batch):
     src_list, tgt_list = zip(*batch)
@@ -99,12 +104,7 @@ def collate_fn(batch):
     return src_padded, tgt_padded, src_lengths, tgt_lengths
 
 
-train_loader = DataLoader(
-    train_dataset, batch_size=1, shuffle=True, collate_fn=collate_fn
-)
-
-
-def train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, teacher_forcing_ratio=1.0):
+def train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader, teacher_forcing_ratio=1.0):
     batch_size, max_len = tgt.shape
     
     with autocast(enabled=use_amp):
@@ -122,60 +122,80 @@ def train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, teacher_for
     return logits, loss
 
 
+if __name__ == "__main__":
+    criterion = WeightedCrossEntropyLoss(
+        num_classes=NUM_TOKENS, ignore_index=PAD_TOKEN, zero_weight=0.1
+    )
 
-# Training loop
-num_epochs = 50
-for epoch in range(start_epoch, num_epochs):
-    model.train()
-    total_loss = 0
-    optimizer.zero_grad()
+    train_loader = DataLoader(
+        train_dataset, batch_size=1, shuffle=True, collate_fn=collate_fn
+    )
+    # Training loop
+    num_epochs = 50
 
-    for batch_idx, (src, tgt, src_lengths, tgt_lengths) in enumerate(train_loader):
-        src, tgt = src.to(device), tgt.to(device)
-        src_lengths, tgt_lengths = src_lengths.to(device), tgt_lengths.to(device)
+    wandb.init(project="hilbert_predictor", config={
+            "num_epochs": num_epochs,
+            "batch_size": batch_size,
+            "accumulation_steps": accumulation_steps,
+            "d_model": d_model,
+            "nhead": nhead,
+            "num_layers": num_layers,
+            "dim_feedforward": dim_feedforward,
+            "dropout_rate": dropout_rate,
+        })
 
-        with autocast(enabled=use_amp):
-            generated_ids, loss = train_step(model, src, tgt, src_lengths, tgt_lengths, criterion)
 
-        scaler.scale(loss).backward()
+    for epoch in range(start_epoch, num_epochs):
+        model.train()
+        total_loss = 0
+        optimizer.zero_grad()
 
-        if (batch_idx + 1) % accumulation_steps == 0:
+        for batch_idx, (src, tgt, src_lengths, tgt_lengths) in enumerate(train_loader):
+            src, tgt = src.to(device), tgt.to(device)
+            src_lengths, tgt_lengths = src_lengths.to(device), tgt_lengths.to(device)
+
+            with autocast(enabled=use_amp):
+                generated_ids, loss = train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader)
+
+            scaler.scale(loss).backward()
+
+            if (batch_idx + 1) % accumulation_steps == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+
+            total_loss += loss.item()
+
+            print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
+
+            if batch_idx % 100 == 0:
+                torch.save(
+                    {
+                        "epoch": epoch,
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "loss": loss.item(),
+                    },
+                    checkpoint_path,
+                )
+
+        # Perform the last optimization step if needed
+        if (batch_idx + 1) % accumulation_steps != 0:
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
 
-        total_loss += loss.item()
+        avg_loss = total_loss / len(train_loader)
+        print(f"Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}")
 
-        print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "loss": avg_loss,
+            },
+            checkpoint_path,
+        )
 
-        if batch_idx % 100 == 0:
-            torch.save(
-                {
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "loss": loss.item(),
-                },
-                checkpoint_path,
-            )
-
-    # Perform the last optimization step if needed
-    if (batch_idx + 1) % accumulation_steps != 0:
-        scaler.step(optimizer)
-        scaler.update()
-        optimizer.zero_grad()
-
-    avg_loss = total_loss / len(train_loader)
-    print(f"Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}")
-
-    torch.save(
-        {
-            "epoch": epoch,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "loss": avg_loss,
-        },
-        checkpoint_path,
-    )
-
-print("Training completed.")
+    print("Training completed.")
