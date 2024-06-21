@@ -22,6 +22,8 @@ from .data import (
 from torch.cuda.amp import autocast, GradScaler
 
 batch_size = 1
+if torch.cuda.is_available():
+    batch_size = 32
 accumulation_steps = 16  # Accumulate gradients over 16 batches
 use_amp = True  # Use Automatic Mixed Precision
 
@@ -34,6 +36,16 @@ train_dataset = TensorDataset(
 # Loss function and optimizer
 optimizer = optim.Adam(model.parameters(), lr=1e-4)
 scaler = GradScaler(enabled=use_amp)
+
+# Load checkpoint if it exists
+start_epoch = 0
+if checkpoint_path.exists():
+    print(f"Loading checkpoint from {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    start_epoch = checkpoint["epoch"] + 1
+    print(f"Resuming from epoch {start_epoch}")
 
 
 class WeightedCrossEntropyLoss(nn.Module):
@@ -93,7 +105,7 @@ train_loader = DataLoader(
 
 
 def train_step(
-    model, src, tgt, src_lengths, tgt_lengths, criterion, teacher_forcing_ratio=0.5
+    model, src, tgt, src_lengths, tgt_lengths, criterion, teacher_forcing_ratio=1.0
 ):
     batch_size, max_len = tgt.shape
 
@@ -129,7 +141,7 @@ def train_step(
 
 # Training loop
 num_epochs = 50
-for epoch in range(num_epochs):
+for epoch in range(start_epoch, num_epochs):
     model.train()
     total_loss = 0
     optimizer.zero_grad()
@@ -152,10 +164,8 @@ for epoch in range(num_epochs):
 
         total_loss += loss.item()
 
+        print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
         if batch_idx % 100 == 0:
-            print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
-            print("Predicted:", torch.argmax(outputs[0, 0, :], dim=-1))
-            print("Softmax of output:", torch.softmax(outputs[0, 0, :], dim=-1))
             torch.save(
                 {
                     "epoch": epoch,

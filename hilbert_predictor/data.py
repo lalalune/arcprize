@@ -259,13 +259,30 @@ evaluating_file_paths = [
     if f.endswith(".json")
 ]
 
-training_data = load_and_process_training_data(
-    training_file_paths, max_context_length=4096
-)
-evaluating_data = load_and_process_eval_data(
-    evaluating_file_paths, max_context_length=4096
-)
+# Check if processed data files exist
+processed_training_file = "processed_training_data.npy"
+processed_evaluating_file = "processed_evaluating_data.npy"
 
-# Save processed data
-np.save("processed_training_data.npy", training_data)
-np.save("processed_evaluating_data.npy", evaluating_data)
+if os.path.exists(processed_training_file) and os.path.exists(
+    processed_evaluating_file
+):
+    print("Loading pre-processed data...")
+    training_data = np.load(processed_training_file, allow_pickle=True)
+    evaluating_data = np.load(processed_evaluating_file, allow_pickle=True)
+    print(f"Loaded {len(training_data)} training data points")
+    print(f"Loaded {len(evaluating_data)} evaluation data points")
+else:
+    print("Processing data...")
+    training_data = load_and_process_training_data(
+        training_file_paths, max_context_length=4096
+    )
+    evaluating_data = load_and_process_eval_data(
+        evaluating_file_paths, max_context_length=4096
+    )
+
+    # Save processed data
+    np.save(processed_training_file, training_data)
+    np.save(processed_evaluating_file, evaluating_data)
+    print("Processed data saved.")
+
+print("Data loading completed.")
