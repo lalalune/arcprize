@@ -27,16 +27,17 @@ class TransformerModel(nn.Module):
         return mask
 
 
-    def forward(self, src):
+    def forward(self, src, tgt=None):
         # Mask creation
         src_key_padding_mask = (src == 10)  # True where src is padding
 
-        # Apply to correct portions of src for context and target
-        memory_key_padding_mask = src_key_padding_mask[:, :self.num_context_tokens]
-        tgt_key_padding_mask = src_key_padding_mask[:, self.num_context_tokens:]
+        context = self.embedding(src)
 
-        context = self.embedding(src[:, :self.num_context_tokens])
-        target = self.embedding(src[:, self.num_context_tokens:])
+        if tgt is None:
+            tgt = torch.zeros((src.size(0), self.num_pred_tokens), dtype=torch.long, device=self.device)
+        
+        tgt_key_padding_mask = (tgt == 10)  # True where tgt is padding
+        target = self.embedding(tgt)
 
         # Generate target mask for sequence-to-sequence models
         target_mask = self.generate_square_subsequent_mask(target.size(1))
@@ -46,9 +47,10 @@ class TransformerModel(nn.Module):
             tgt=target,
             src=context,
             tgt_mask=target_mask,
-            src_key_padding_mask=memory_key_padding_mask,
+            src_key_padding_mask=src_key_padding_mask,
             tgt_key_padding_mask=tgt_key_padding_mask
         )
 
         output = self.fc_out(output)
         return output
+

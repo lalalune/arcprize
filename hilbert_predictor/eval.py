@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from matplotlib import pyplot as plt
+from .gilbert2d import unflatten_1d_to_2d, gilbert2d
 
 from .data import load_data, padded_train_data, padded_test_data, evaluating_file_paths
 from .model import TransformerModel
@@ -72,59 +73,106 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
     model.eval()
 
     os.makedirs('prediction_plots', exist_ok=True)
-    sample_counter = 0  # To keep track of which sample we're on
+
+    total_correct = 0
+    total_tokens = 0
+    all_accuracies = []
+
+    # Verification step
+    zero_input = torch.zeros((1, num_context_tokens), dtype=torch.long, device=device)
+    zero_output = model(zero_input)
+    print(f"Zero input produces output of shape: {zero_output.shape}")
 
     with torch.no_grad():
-        for src, filename in zip(test_loader, filenames):
-            src = src[0].to(device)
-            output = model(src)
+        for batch, filename in zip(test_loader, filenames):
+            src = batch[0].to(device)
+            input_seq = src[:, :num_context_tokens]
+            target = src[:, num_context_tokens:num_context_tokens+num_pred_tokens]
+            
+            output = model(input_seq)
             _, predicted = torch.max(output.data, -1)
 
+            # Remove padding tokens for accuracy calculation
+            mask = target != 10
+            predicted_no_pad = predicted[mask]
+            target_no_pad = target[mask]
+            
+            correct = (predicted_no_pad == target_no_pad).sum().item()
+            total_correct += correct
+            total_tokens += target_no_pad.numel()
+
+            batch_accuracy = correct / target_no_pad.numel() if target_no_pad.numel() > 0 else 0
+            all_accuracies.append(batch_accuracy)
+
             for i in range(src.size(0)):
-                input_seq = src[i, :num_context_tokens].cpu().numpy()
+                input_seq_np = input_seq[i].cpu().numpy()
                 predicted_seq = predicted[i].cpu().numpy()
-                target_seq = src[i, num_context_tokens:num_context_tokens+num_pred_tokens].cpu().numpy()
+                target_seq = target[i].cpu().numpy()
 
-                # plot_prediction(input_seq, predicted_seq, target_seq, sample_counter, filename)
-                sample_counter += 1
+                # remove all 10s from all sequences
+                input_seq_np = input_seq_np[input_seq_np != 10]
+                predicted_seq = predicted_seq[predicted_seq != 10]
+                target_seq = target_seq[target_seq != 10]
+                
+                # resize predicted seq to be same length as target seq
+                predicted_seq = predicted_seq[:len(target_seq)]
+                
+                # print the values of these
+                print(f"Input: {input_seq_np}")
+                print(f"Predicted: {predicted_seq}")
+                print(f"Target: {target_seq}")
 
-# def plot_prediction(input_seq, predicted_seq, target_seq, sample_index, filename):
-#     # Remove padding tokens (value 10)
-#     input_seq = input_seq[input_seq != 10]
-#     predicted_seq = predicted_seq[predicted_seq != 10]
-#     target_seq = target_seq[target_seq != 10]
+                plot_hilbert_curves(input_seq_np, predicted_seq, target_seq, i, filename)
+
+    overall_accuracy = total_correct / total_tokens if total_tokens > 0 else 0
+    print(f"Overall Accuracy: {overall_accuracy:.4f}")
+    print(f"Mean Batch Accuracy: {np.mean(all_accuracies):.4f}")
+    print(f"Std Dev of Batch Accuracy: {np.std(all_accuracies):.4f}")
+
+def plot_hilbert_curves(input_seq, predicted_seq, target_seq, sample_index, filename):
+    # Remove padding tokens (value 10)
+    input_seq = input_seq[input_seq != 10]
+    predicted_seq = predicted_seq[predicted_seq != 10]
+    target_seq = target_seq[target_seq != 10]
     
-#     # resize predicted_seq to match the length of target_seq
-#     predicted_seq = np.pad(predicted_seq, (0, len(target_seq) - len(predicted_seq)), 'constant', constant_values=10)
+    # Ensure predicted_seq is the same length as target_seq
+    predicted_seq = predicted_seq[:len(target_seq)]
+
+    # Calculate the size of the grids
+    input_height = int(np.ceil(np.sqrt(len(input_seq))))
+    input_width = int(np.ceil(len(input_seq) / input_height))
     
-#     # Calculate the size of the grid
-#     # TODO: These are wrong. These values are NOT square, they can be rectangles, so they need to come from the input
-#     # We can probably solve this by saving the input size with our data
-#     input_size = int(np.sqrt(len(input_seq)))
-#     pred_size = int(np.sqrt(len(target_seq)))
-#     target_size = int(np.sqrt(len(target_seq)))
-    
-#     # Reshape the sequences into 2D grids
-#     input_grid = input_seq.reshape(input_size, input_size)
-#     predicted_grid = predicted_seq.reshape(pred_size, pred_size)
-#     target_grid = target_seq.reshape(target_size, target_size)
+    target_height = int(np.ceil(np.sqrt(len(target_seq))))
+    target_width = int(np.ceil(len(target_seq) / target_height))
 
-#     fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-#     grids = [input_grid, predicted_grid, target_grid]
-#     titles = ['Input', 'Predicted', 'Target']
+    # Unflatten the sequences into 2D grids
+    input_grid = unflatten_1d_to_2d(input_seq, input_width, input_height)
+    predicted_grid = unflatten_1d_to_2d(predicted_seq, target_width, target_height)
+    target_grid = unflatten_1d_to_2d(target_seq, target_width, target_height)
 
-#     for ax, grid, title in zip(axs, grids, titles):
-#         c = ax.pcolormesh(grid, cmap=colormap, rasterized=True, vmin=0, vmax=9)
-#         ax.set_title(title)
-#         ax.set_xticks(np.arange(0, grid.shape[1]+1, 1))
-#         ax.set_yticks(np.arange(0, grid.shape[0]+1, 1))
-#         ax.grid(which='both', color='w', linestyle='-', linewidth=2)
-#         ax.set_aspect('equal')
-#         fig.colorbar(c, ax=ax)
+    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+    grids = [input_grid, predicted_grid, target_grid]
+    titles = ['Input', 'Predicted', 'Target']
 
-#     plt.tight_layout()
-#     plt.savefig(f'prediction_plots/prediction_{sample_index}_{filename}.png')
-#     plt.close(fig)
+    for ax, grid, title in zip(axs, grids, titles):
+        im = ax.imshow(grid, cmap='tab10', vmin=0, vmax=9)
+        ax.set_title(title)
+        ax.axis('off')
+
+    plt.colorbar(im, ax=axs.ravel().tolist(), label='Token Value')
+    plt.tight_layout()
+    plt.savefig(f'prediction_plots/hilbert_prediction_{sample_index}_{filename}.png')
+    plt.close(fig)
+
+# Update the unflatten_1d_to_2d function in gilbert2d.py:
+def unflatten_1d_to_2d(array_1d, width, height):
+    array_2d = np.full((height, width), 10)  # Fill with padding value
+    for idx, (x, y) in enumerate(gilbert2d(width, height)):
+        if idx < len(array_1d):
+            array_2d[y][x] = array_1d[idx]
+        else:
+            break
+    return array_2d
     
 model = TransformerModel(num_tokens=num_tokens, d_model=512, nhead=8, dim_feedforward=2048, num_layers=6,
                          num_context_tokens=num_context_tokens, num_pred_tokens=num_pred_tokens, device=device)
