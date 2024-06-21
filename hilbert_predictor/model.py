@@ -70,5 +70,5 @@ print(f"Using device: {device}")
 num_context_tokens = 1024
 num_pred_tokens = 1024
 checkpoint_path = Path("checkpoint.pt")
-model = TransformerModel(num_tokens=num_tokens, d_model=512, nhead=8, dim_feedforward=2048, num_layers=6,
+model = TransformerModel(num_tokens=num_tokens, d_model=256, nhead=8, dim_feedforward=1024, num_layers=4,
                          num_context_tokens=num_context_tokens, num_pred_tokens=num_pred_tokens, device=device)

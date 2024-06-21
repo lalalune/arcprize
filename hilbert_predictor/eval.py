@@ -63,8 +63,7 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    model = TransformerModel(num_tokens=10, d_model=512, nhead=8, dim_feedforward=2048, num_layers=6,
-                             num_context_tokens=num_context_tokens, num_pred_tokens=num_pred_tokens, device=device)
+    
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
