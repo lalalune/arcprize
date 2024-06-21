@@ -13,3 +13,9 @@ To eval
 python -m hilbert_predictor.eval
 
 ```
+
+## NOTES:
+
+Tokens 0-9 are colors
+Token 10 is padding, ignored by the model
+Token 11 is START and token 12 is END token, which bookend the actual sequence

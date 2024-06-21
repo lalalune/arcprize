@@ -6,9 +6,8 @@ from torch.utils.data import DataLoader, TensorDataset
 import torch.optim as optim
 
 from .data import padded_train_data
-from .model import model, checkpoint_path
+from .model import model, checkpoint_path, num_tokens
 
-num_tokens = 10
 # Assuming `padded_train_data` is already loaded and preprocessed
 train_inputs = np.array(padded_train_data)
 train_dataset = TensorDataset(torch.tensor(train_inputs, dtype=torch.long))

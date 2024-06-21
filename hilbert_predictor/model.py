@@ -3,6 +3,8 @@ import torch.nn as nn
 import numpy as np
 from pathlib import Path
 
+num_tokens = 12
+
 class TransformerModel(nn.Module):
     def __init__(self, num_tokens, d_model, nhead, dim_feedforward, num_layers, num_context_tokens, num_pred_tokens, device):
         super().__init__()
@@ -60,8 +62,6 @@ class TransformerModel(nn.Module):
         output = output * tgt_non_padding_mask.unsqueeze(-1).float()
 
         return output
-
-num_tokens = 10
 
 # Set device to GPU if available, else CPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

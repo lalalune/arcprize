@@ -3,6 +3,10 @@ import os
 import json
 from .gilbert2d import flatten_2d_to_1d
 
+PAD_TOKEN = 10
+START_TOKEN = 11
+END_TOKEN = 12
+
 def load_data(file_paths):
     train_data = []
     test_data = []
@@ -63,10 +67,24 @@ def pad_examples(examples, max_length=1024):
     padded_examples = []
     for example in examples:
         input_example, output_example = example
+        
+        # Pad input
         input_padded = np.pad(input_example, (max_length - len(input_example), 0), 'constant', constant_values=10)
+        
+        # Replace last padding token (10) with START_TOKEN
+        last_padding_index = np.where(input_padded == 10)[0][-1]
+        input_padded[last_padding_index] = START_TOKEN
+        
+        # Pad output
         output_padded = np.pad(output_example, (0, max_length - len(output_example)), 'constant', constant_values=10)
+        
+        # Replace first padding token (10) with END_TOKEN
+        first_padding_index = np.where(output_padded == 10)[0][0]
+        output_padded[first_padding_index] = END_TOKEN
+        
         padded_examples.append((input_padded, output_padded))
     return padded_examples
+
 
 padded_train_data = [pad_examples(data) for data in training_train_data]
 padded_test_data = [pad_examples(data) for data in training_test_data]

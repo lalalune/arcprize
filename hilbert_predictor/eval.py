@@ -10,9 +10,8 @@ from matplotlib.colors import ListedColormap
 
 from .gilbert2d import unflatten_1d_to_2d, gilbert2d
 from .data import load_data, padded_train_data, padded_test_data, evaluating_file_paths
-from .model import TransformerModel, model, checkpoint_path, num_context_tokens, num_pred_tokens
+from .model import TransformerModel, model, checkpoint_path, num_context_tokens, num_pred_tokens, num_tokens
 
-num_tokens = 10
 # Assuming `padded_train_data` is already loaded and preprocessed
 train_inputs = np.array(padded_train_data)
 train_dataset = TensorDataset(torch.tensor(train_inputs, dtype=torch.long))
