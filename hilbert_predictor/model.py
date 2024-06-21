@@ -22,9 +22,8 @@ class TransformerModel(nn.Module):
         self.to(device)
 
 
-    def generate_square_subsequent_mask(self, sz):
-        mask = torch.triu(torch.ones((sz, sz), device=self.device), diagonal=1)
-        mask = mask.masked_fill(mask == 1, float('-inf'))
+    def generate_square_subsequent_mask(self, size):
+        mask = torch.triu(torch.ones(size, size, device=self.device), diagonal=1).bool()
         return mask
 
 
