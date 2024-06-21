@@ -147,7 +147,6 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
     print(f"Completely Correct Predictions: {completely_correct} out of {total_predictions}")
     print(f"Percentage of Completely Correct Predictions: {completely_correct_percentage:.2f}%")
 
-    zero_predictions = sum(1 for acc in all_accuracies if acc == 0)
     print(f"Number of predictions with all zero outputs: {zero_predictions} out of {total_predictions}")
     print(f"Percentage of predictions with all zero outputs: {zero_predictions / total_predictions * 100:.2f}%")
 
