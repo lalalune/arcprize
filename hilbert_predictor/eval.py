@@ -85,41 +85,46 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
                 predicted_seq = predicted[i].cpu().numpy()
                 target_seq = src[i, num_context_tokens:num_context_tokens+num_pred_tokens].cpu().numpy()
 
-                plot_prediction(input_seq, predicted_seq, target_seq, sample_counter, filename)
+                # plot_prediction(input_seq, predicted_seq, target_seq, sample_counter, filename)
                 sample_counter += 1
 
-def plot_prediction(input_seq, predicted_seq, target_seq, sample_index, filename):
-    # Remove padding tokens (value 10)
-    input_seq = input_seq[input_seq != 10]
-    predicted_seq = predicted_seq[predicted_seq != 10]
-    target_seq = target_seq[target_seq != 10]
+# def plot_prediction(input_seq, predicted_seq, target_seq, sample_index, filename):
+#     # Remove padding tokens (value 10)
+#     input_seq = input_seq[input_seq != 10]
+#     predicted_seq = predicted_seq[predicted_seq != 10]
+#     target_seq = target_seq[target_seq != 10]
     
-    # Calculate the size of the grid
-    input_size = int(np.sqrt(len(input_seq)))
-    pred_size = int(np.sqrt(len(predicted_seq)))
-    target_size = int(np.sqrt(len(target_seq)))
+#     # resize predicted_seq to match the length of target_seq
+#     predicted_seq = np.pad(predicted_seq, (0, len(target_seq) - len(predicted_seq)), 'constant', constant_values=10)
     
-    # Reshape the sequences into 2D grids
-    input_grid = input_seq.reshape(input_size, input_size)
-    predicted_grid = predicted_seq.reshape(pred_size, pred_size)
-    target_grid = target_seq.reshape(target_size, target_size)
+#     # Calculate the size of the grid
+#     # TODO: These are wrong. These values are NOT square, they can be rectangles, so they need to come from the input
+#     # We can probably solve this by saving the input size with our data
+#     input_size = int(np.sqrt(len(input_seq)))
+#     pred_size = int(np.sqrt(len(target_seq)))
+#     target_size = int(np.sqrt(len(target_seq)))
+    
+#     # Reshape the sequences into 2D grids
+#     input_grid = input_seq.reshape(input_size, input_size)
+#     predicted_grid = predicted_seq.reshape(pred_size, pred_size)
+#     target_grid = target_seq.reshape(target_size, target_size)
 
-    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-    grids = [input_grid, predicted_grid, target_grid]
-    titles = ['Input', 'Predicted', 'Target']
+#     fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+#     grids = [input_grid, predicted_grid, target_grid]
+#     titles = ['Input', 'Predicted', 'Target']
 
-    for ax, grid, title in zip(axs, grids, titles):
-        c = ax.pcolormesh(grid, cmap=colormap, rasterized=True, vmin=0, vmax=9)
-        ax.set_title(title)
-        ax.set_xticks(np.arange(0, grid.shape[1]+1, 1))
-        ax.set_yticks(np.arange(0, grid.shape[0]+1, 1))
-        ax.grid(which='both', color='w', linestyle='-', linewidth=2)
-        ax.set_aspect('equal')
-        fig.colorbar(c, ax=ax)
+#     for ax, grid, title in zip(axs, grids, titles):
+#         c = ax.pcolormesh(grid, cmap=colormap, rasterized=True, vmin=0, vmax=9)
+#         ax.set_title(title)
+#         ax.set_xticks(np.arange(0, grid.shape[1]+1, 1))
+#         ax.set_yticks(np.arange(0, grid.shape[0]+1, 1))
+#         ax.grid(which='both', color='w', linestyle='-', linewidth=2)
+#         ax.set_aspect('equal')
+#         fig.colorbar(c, ax=ax)
 
-    plt.tight_layout()
-    plt.savefig(f'prediction_plots/prediction_{sample_index}_{filename}.png')
-    plt.close(fig)
+#     plt.tight_layout()
+#     plt.savefig(f'prediction_plots/prediction_{sample_index}_{filename}.png')
+#     plt.close(fig)
     
 model = TransformerModel(num_tokens=num_tokens, d_model=512, nhead=8, dim_feedforward=2048, num_layers=6,
                          num_context_tokens=num_context_tokens, num_pred_tokens=num_pred_tokens, device=device)
