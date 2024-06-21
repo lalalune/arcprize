@@ -14,7 +14,7 @@ num_tokens = 10
 # Assuming `padded_train_data` is already loaded and preprocessed
 train_inputs = np.array(padded_train_data)
 train_dataset = TensorDataset(torch.tensor(train_inputs, dtype=torch.long))
-train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
+train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 
 # Set device to GPU if available, else CPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -64,7 +64,7 @@ def evaluate(model, loader, device):
 def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames):
     test_inputs = np.array(padded_test_data)
     test_dataset = TensorDataset(torch.tensor(test_inputs, dtype=torch.long))
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model = TransformerModel(num_tokens=10, d_model=512, nhead=8, dim_feedforward=2048, num_layers=6,
