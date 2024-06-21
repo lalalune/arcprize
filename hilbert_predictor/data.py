@@ -2,141 +2,256 @@ import numpy as np
 import os
 import json
 from .gilbert2d import flatten_2d_to_1d
+import itertools
+import random
+import hashlib
+
+def example_to_hashable(example):
+    return hashlib.md5(str(example).encode()).hexdigest()
 
 PAD_TOKEN = 10
-START_TOKEN = 11
-END_TOKEN = 12
+START_EXAMPLE_TOKEN = 11
+END_EXAMPLE_TOKEN = 12
+START_SEQUENCE_TOKEN = 13
+END_SEQUENCE_TOKEN = 14
+NUM_TOKENS = 15
 
-def load_data(file_paths):
-    train_data = []
-    test_data = []
+def identity(x):
+    return x
+identity.is_identity = True
+
+def flip_horizontal(matrix):
+    return np.fliplr(matrix)
+flip_horizontal.is_identity = False
+
+def flip_vertical(matrix):
+    return np.flipud(matrix)
+flip_vertical.is_identity = False
+
+def rotate_180(matrix):
+    return np.rot90(matrix, 2)
+rotate_180.is_identity = False
+
+augmentation_functions = [
+    identity,
+    flip_horizontal,
+    flip_vertical,
+    rotate_180
+]
+
+def apply_transform(example, transform_func):
+    return {
+        "input": transform_func(np.array(example["input"])).tolist(),
+        "output": transform_func(np.array(example["output"])).tolist()
+    }
+
+def flip_input_output(example):
+    return {"input": example["output"], "output": example["input"]}
+
+def generate_random_token_mapping():
+    tokens = list(range(1, 10))
+    shuffled = tokens.copy()
+    random.shuffle(shuffled)
+    return dict(zip(tokens, shuffled))
+
+def apply_token_mapping(example, mapping):
+    def map_array(arr):
+        return [[mapping.get(val, val) for val in row] for row in arr]
+    
+    return {
+        "input": map_array(example["input"]),
+        "output": map_array(example["output"])
+    }
+
+def generate_all_augmentations(example, num_augmentations=6):
+    augmentations = [example]  # Include the original, unaugmented example
+    
+    for _ in range(num_augmentations):
+        transform_func = random.choice(augmentation_functions)
+        augmented = apply_transform(example, transform_func)
+        
+        if not transform_func.is_identity:
+            token_mapping = generate_random_token_mapping()
+            augmented = apply_token_mapping(augmented, token_mapping)
+        
+        if random.random() < 0.5:  # 50% chance to flip input-output
+            augmented = flip_input_output(augmented)
+        
+        augmentations.append(augmented)
+    
+    return augmentations
+
+def remove_zeros_from_sequence(sequence):
+    return [x for x in sequence if x != 0]
+
+def generate_contexts(train_example, max_context_length=8192):
+    context = [START_SEQUENCE_TOKEN]
+    unpadded_context = [START_SEQUENCE_TOKEN]
+    
+    context.append(START_EXAMPLE_TOKEN)
+    unpadded_context.append(START_EXAMPLE_TOKEN)
+    
+    train_input = flatten_2d_to_1d(np.array(train_example['input']))
+    train_output = flatten_2d_to_1d(np.array(train_example['output']))
+    
+    context.extend(train_input)
+    context.extend(train_output)
+    unpadded_context.extend(train_input)
+    unpadded_context.extend(train_output)
+    
+    context.append(END_EXAMPLE_TOKEN)
+    unpadded_context.append(END_EXAMPLE_TOKEN)
+    
+    context.append(END_SEQUENCE_TOKEN)
+    unpadded_context.append(END_SEQUENCE_TOKEN)
+    
+    # Pad the context if necessary
+    if len(context) < max_context_length:
+        context = context + [PAD_TOKEN] * (max_context_length - len(context))
+    else:
+        context = context[:max_context_length]
+    
+    target = [START_SEQUENCE_TOKEN] + train_output + [END_SEQUENCE_TOKEN]
+    target = target + [PAD_TOKEN] * (max_context_length - len(target))
+    
+    return [(np.array(context), np.array(target))]
+
+def generate_zero_removed_variant(context, target):
+    zero_removed_context = remove_zeros_from_sequence(context.tolist())
+    zero_removed_target = remove_zeros_from_sequence(target.tolist())
+    
+    # Ensure padding to max_context_length
+    if len(zero_removed_context) < len(context):
+        zero_removed_context += [PAD_TOKEN] * (len(context) - len(zero_removed_context))
+    if len(zero_removed_target) < len(target):
+        zero_removed_target += [PAD_TOKEN] * (len(target) - len(zero_removed_target))
+    
+    return np.array(zero_removed_context), np.array(zero_removed_target)
+
+def load_and_process_training_data(file_paths, max_context_length=8192):
+    processed_data = []
+    unpadded_strings = []
+    
     for file_path in file_paths:
-        rules_input = []
-        rules_input_hilbert = []
-        test_input = []
-        test_input_hilbert = []
         with open(file_path, 'r') as f:
             data = json.load(f)
-            for item in data['train']:
-                input_hilbert = flatten_2d_to_1d(np.array(item['input']))
-                output_hilbert = flatten_2d_to_1d(np.array(item['output']))
-                                
-                rules_input.append([
-                    np.array(item['input'], dtype=np.int64),
-                    np.array(item['output'], dtype=np.int64)
-                ])
+        
+        original_train = data['train']
+        
+        all_train_data = []
+        for ex in original_train:
+            all_train_data.extend(generate_all_augmentations(ex, num_augmentations=6))
+        
+        unique_train_data = []
+        unique_examples = set()
+        for ex in all_train_data:
+            ex_hash = example_to_hashable(ex)
+            if ex_hash not in unique_examples:
+                unique_train_data.append(ex)
+                unique_examples.add(ex_hash)
+        
+        for train_example in unique_train_data:
+            contexts = generate_contexts(train_example, max_context_length)
+            for context, target in contexts:
+                processed_data.append((context, target))
+                unpadded_strings.append(' '.join(map(str, context)))
                 
-                rules_input_hilbert.append([
-                    np.array(input_hilbert, dtype=np.int64),
-                    np.array(output_hilbert, dtype=np.int64)
-                ])
-                
-            for item in data['test']:
-                test_input.append([
-                    np.array(item['input'], dtype=np.int64),
-                    np.array(item['output'], dtype=np.int64)
-                ])
-                
-                input_hilbert = flatten_2d_to_1d(np.array(item['input']))
-                output_hilbert = flatten_2d_to_1d(np.array(item['output']))
-                
-                test_input_hilbert.append([
-                    np.array(input_hilbert, dtype=np.int64),
-                    np.array(output_hilbert, dtype=np.int64)
-                ])
-                
-                
-        # train_data.append(rules_input)
-        # test_data.append(test_input)
-        train_data.append(rules_input_hilbert)
-        test_data.append(test_input_hilbert)
-    return train_data, test_data
+            # Generate and add the zero-removed variant
+            zero_removed_context, zero_removed_target = generate_zero_removed_variant(contexts[0][0], contexts[0][1])
+            processed_data.append((zero_removed_context, zero_removed_target))
+            unpadded_strings.append(' '.join(map(str, zero_removed_context)))
+        
+        print(f"Processed training file: {file_path}")
+        print(f"  Original training examples: {len(original_train)}")
+        print(f"  Unique augmented training examples: {len(unique_train_data)}")
+        print(f"  Total processed examples: {len(unique_train_data)}")
+        print("---")
+    
+    with open('hilbert_training_data.txt', 'w') as f:
+        for string in unpadded_strings:
+            f.write(string + '\n')
+    
+    print(f"Total processed training data points: {len(processed_data)}")
+    return processed_data
 
-# Load training data
+def load_and_process_eval_data(file_paths, max_context_length=8192):
+    processed_data = []
+    unpadded_strings = []
+    
+    for file_path in file_paths:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        
+        train_examples = data['train']
+        test_examples = data['test']
+        
+        # Process each test example
+        for test_example in test_examples:
+            context = [START_SEQUENCE_TOKEN]
+            unpadded_context = [START_SEQUENCE_TOKEN]
+            
+            # Add all training examples to the context
+            for train_example in train_examples:
+                context.append(START_EXAMPLE_TOKEN)
+                unpadded_context.append(START_EXAMPLE_TOKEN)
+                
+                train_input = flatten_2d_to_1d(np.array(train_example['input']))
+                train_output = flatten_2d_to_1d(np.array(train_example['output']))
+                context.extend(train_input)
+                context.extend(train_output)
+                unpadded_context.extend(train_input)
+                unpadded_context.extend(train_output)
+                
+                context.append(END_EXAMPLE_TOKEN)
+                unpadded_context.append(END_EXAMPLE_TOKEN)
+            
+            # Add the test input
+            context.append(START_EXAMPLE_TOKEN)
+            unpadded_context.append(START_EXAMPLE_TOKEN)
+            test_input = flatten_2d_to_1d(np.array(test_example['input']))
+            context.extend(test_input)
+            unpadded_context.extend(test_input)
+            context.append(END_EXAMPLE_TOKEN)
+            unpadded_context.append(END_EXAMPLE_TOKEN)
+            
+            context.append(END_SEQUENCE_TOKEN)
+            unpadded_context.append(END_SEQUENCE_TOKEN)
+            
+            # Pad the context if necessary
+            if len(context) < max_context_length:
+                context = context + [PAD_TOKEN] * (max_context_length - len(context))
+            else:
+                context = context[:max_context_length]
+            
+            target = [START_SEQUENCE_TOKEN] + flatten_2d_to_1d(np.array(test_example['output'])) + [END_SEQUENCE_TOKEN]
+            target = target + [PAD_TOKEN] * (max_context_length - len(target))
+            
+            processed_data.append((np.array(context), np.array(target)))
+            unpadded_strings.append(' '.join(map(str, unpadded_context)))
+        
+        print(f"Processed eval file: {file_path}")
+        print(f"  Training examples: {len(train_examples)}")
+        print(f"  Test examples: {len(test_examples)}")
+        print(f"  Total processed examples: {len(test_examples)}")
+        print("---")
+    
+    with open('hilbert_eval_data.txt', 'w') as f:
+        for string in unpadded_strings:
+            f.write(string + '\n')
+    
+    print(f"Total processed eval data points: {len(processed_data)}")
+    return processed_data
+
+# Load and process data
 training_data_dir = "./data/training"
 evaluating_data_dir = "./data/evaluation"
 
-# get all files in training_data_dir that end with .json
 training_file_paths = [os.path.join(training_data_dir, f) for f in os.listdir(training_data_dir) if f.endswith('.json')]
 evaluating_file_paths = [os.path.join(evaluating_data_dir, f) for f in os.listdir(evaluating_data_dir) if f.endswith('.json')]
 
-training_train_data, training_test_data = load_data(training_file_paths)
-evaluating_train_data, evaluating_test_data = load_data(evaluating_file_paths)
+training_data = load_and_process_training_data(training_file_paths)
+evaluating_data = load_and_process_eval_data(evaluating_file_paths)
 
-def pad_examples(examples, max_length=1024):
-    padded_examples = []
-    for example in examples:
-        input_example, output_example = example
-        
-        # Pad input
-        input_padded = np.pad(input_example, (max_length - len(input_example), 0), 'constant', constant_values=10)
-        
-        # Replace last padding token (10) with START_TOKEN
-        last_padding_index = np.where(input_padded == 10)[0][-1]
-        input_padded[last_padding_index] = START_TOKEN
-        
-        # Pad output
-        output_padded = np.pad(output_example, (0, max_length - len(output_example)), 'constant', constant_values=10)
-        
-        # Replace first padding token (10) with END_TOKEN
-        first_padding_index = np.where(output_padded == 10)[0][0]
-        output_padded[first_padding_index] = END_TOKEN
-        
-        padded_examples.append((input_padded, output_padded))
-    return padded_examples
-
-
-padded_train_data = [pad_examples(data) for data in training_train_data]
-padded_test_data = [pad_examples(data) for data in training_test_data]
-
-def save_to_file(data, file_path):
-    with open(file_path, 'w') as f:
-        for examples in data:
-            for example in examples:
-                input_example, output_example = example
-                assert len(input_example) == 1024 and len(output_example) == 1024, "Input and output should each be 1024 elements"
-                f.write(' '.join(map(str, input_example)) + ' ' + ' '.join(map(str, output_example)) + '\n')
-                
-
-save_to_file(padded_train_data, 'padded_train_data.txt')
-save_to_file(padded_test_data, 'padded_test_data.txt')
-
-
-## Split file here
-
-padded_test_data = []
-padded_train_data = []
-
-with open('padded_test_data.txt', 'r') as f:
-    for line in f:
-        tokens = line.strip().split(' ')
-        for i in range(len(tokens)):
-            tokens[i] = int(tokens[i])
-        input_example = np.array(tokens, dtype=np.int64)
-        padded_test_data.append(input_example)
-        
-with open('padded_train_data.txt', 'r') as f:
-    for line in f:
-        tokens = line.strip().split(' ')
-        # for each token, read as an int
-        for i in range(len(tokens)):
-            tokens[i] = int(tokens[i])
-        input_example = np.array(tokens, dtype=np.int64)
-        padded_train_data.append(input_example)
-
-print("Training data loaded")
-print('training_train_data:', len(training_train_data))
-print('training_test_data:', len(training_test_data))
-
-# print the first training example
-print(training_train_data[0])
-
-print("Padded train data:")
-# print padded_train_data
-print(padded_train_data)
-# get padded_train_data shape
-print("Padded train data shape:")
-for i, data in enumerate(padded_train_data):
-    print(f"Shape of padded_train_data[{i}]: {np.array(data).shape}")
-# get the dimensions of the padded_train_data
-print(np.array(padded_train_data).shape)
+# Save processed data
+np.save('processed_training_data.npy', training_data)
+np.save('processed_evaluating_data.npy', evaluating_data)
