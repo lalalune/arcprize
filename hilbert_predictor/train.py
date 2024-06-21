@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import torch.optim as optim
 
 from .data import padded_train_data
-from .model import TransformerModel
+from .model import model, checkpoint_path
 
 num_tokens = 10
 # Assuming `padded_train_data` is already loaded and preprocessed
@@ -20,13 +20,15 @@ print(f"Using device: {device}")
 
 num_epochs = 5
 checkpoint_interval = 1
-checkpoint_path = Path('checkpoint.pt')
 num_context_tokens = 1024
 num_pred_tokens = 1024
 
+# Our general plan is to load up 2048 tokens with a forward attention mask, then predict token by token
+# 
+
 def train(model, loader, num_epochs, checkpoint_interval, checkpoint_path, device):
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
-    criterion = nn.CrossEntropyLoss(ignore_index=10)
+    criterion = nn.CrossEntropyLoss(ignore_index=10, label_smoothing=0.1)
     
     start_epoch = 0  # Default start epoch
 
@@ -58,7 +60,14 @@ def train(model, loader, num_epochs, checkpoint_interval, checkpoint_path, devic
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            print(f"Epoch {epoch}, Batch {i}, Loss: {loss.item()}")
+            
+            # Print more detailed information
+            if i % 10 == 0:  # Print every 100 batches
+                print(f"Epoch {epoch}, Batch {i}, Loss: {loss.item()}")
+                print("Output sample:", output[0, 0, :10])  # Print first 10 logits of first token
+                print("Target sample:", target[:10])  # Print first 10 target tokens
+                print("Predicted:", torch.argmax(output[0, 0, :10], dim=-1))
+                print("Softmax of output:", torch.softmax(output[0, 0, :10], dim=-1))
 
             # Save checkpoint at the interval
             if (epoch + 1) % checkpoint_interval == 0:
@@ -76,8 +85,5 @@ def train(model, loader, num_epochs, checkpoint_interval, checkpoint_path, devic
         'loss': loss.item(),
     }, checkpoint_path)
     print(f"Checkpoint saved at epoch {epoch + 1}")
-
-model = TransformerModel(num_tokens=num_tokens, d_model=512, nhead=8, dim_feedforward=2048, num_layers=6,
-                         num_context_tokens=num_context_tokens, num_pred_tokens=num_pred_tokens, device=device)
 
 train(model, train_loader, num_epochs, checkpoint_interval, checkpoint_path, device)
