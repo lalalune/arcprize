@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from pathlib import Path
 
 class TransformerModel(nn.Module):
     def __init__(self, num_tokens, d_model, nhead, dim_feedforward, num_layers, num_context_tokens, num_pred_tokens, device):
@@ -68,6 +69,6 @@ print(f"Using device: {device}")
 
 num_context_tokens = 1024
 num_pred_tokens = 1024
-checkpoint_path = "checkpoint.pt"
+checkpoint_path = Path("checkpoint.pt")
 model = TransformerModel(num_tokens=num_tokens, d_model=512, nhead=8, dim_feedforward=2048, num_layers=6,
                          num_context_tokens=num_context_tokens, num_pred_tokens=num_pred_tokens, device=device)

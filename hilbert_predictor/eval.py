@@ -147,9 +147,6 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
     print(f"Completely Correct Predictions: {completely_correct} out of {total_predictions}")
     print(f"Percentage of Completely Correct Predictions: {completely_correct_percentage:.2f}%")
 
-    print(f"Number of predictions with all zero outputs: {zero_predictions} out of {total_predictions}")
-    print(f"Percentage of predictions with all zero outputs: {zero_predictions / total_predictions * 100:.2f}%")
-
 def plot_hilbert_curves(input_seq, predicted_seq, target_seq, sample_index, filename):
     # Remove padding tokens (value 10)
     input_seq = input_seq[input_seq != 10]
