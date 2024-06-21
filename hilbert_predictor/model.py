@@ -89,10 +89,10 @@ class TransformerModel(nn.Module):
         return mask
 
 # Model initialization
-d_model = 16
-nhead = 1
-num_layers = 2
-dim_feedforward = 64
+d_model = 128
+nhead = 4
+num_layers = 6
+dim_feedforward = 1024
 max_seq_length = 4096
 dropout_rate = 0.1
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

@@ -10,6 +10,8 @@ from .data import NUM_TOKENS, PAD_TOKEN, START_SEQUENCE_TOKEN, END_SEQUENCE_TOKE
 from torch.cuda.amp import autocast, GradScaler
 
 batch_size = 1
+if torch.cuda.is_available():
+    batch_size = 32
 accumulation_steps = 16  # Accumulate gradients over 16 batches
 use_amp = True  # Use Automatic Mixed Precision
 
@@ -20,6 +22,16 @@ train_dataset = TensorDataset(torch.tensor([x[0] for x in training_data], dtype=
 # Loss function and optimizer
 optimizer = optim.Adam(model.parameters(), lr=1e-4)
 scaler = GradScaler(enabled=use_amp)
+
+# Load checkpoint if it exists
+start_epoch = 0
+if checkpoint_path.exists():
+    print(f"Loading checkpoint from {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    start_epoch = checkpoint['epoch'] + 1
+    print(f"Resuming from epoch {start_epoch}")
 
 class WeightedCrossEntropyLoss(nn.Module):
     def __init__(self, num_classes, ignore_index=-100, zero_weight=0.1):
@@ -54,7 +66,7 @@ def collate_fn(batch):
 
 train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=collate_fn)
 
-def train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, teacher_forcing_ratio=0.5):
+def train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, teacher_forcing_ratio=1.0):
     batch_size, max_len = tgt.shape
     
     decoder_input = torch.full((batch_size, 1), START_SEQUENCE_TOKEN, dtype=torch.long).to(device)
@@ -79,11 +91,9 @@ def train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, teacher_for
     
     return outputs
 
-
-
 # Training loop
 num_epochs = 50
-for epoch in range(num_epochs):
+for epoch in range(start_epoch, num_epochs):
     model.train()
     total_loss = 0
     optimizer.zero_grad()
@@ -106,10 +116,8 @@ for epoch in range(num_epochs):
         
         total_loss += loss.item()
         
+        print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
         if batch_idx % 100 == 0:
-            print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
-            print("Predicted:", torch.argmax(outputs[0, 0, :], dim=-1))
-            print("Softmax of output:", torch.softmax(outputs[0, 0, :], dim=-1))
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
