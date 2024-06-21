@@ -1,3 +1,7 @@
+hilbert_predictor/__pycache__
+__pycache__
 keys.txt
 *.pt
 predictions.txt
+prediction_plots
+*data.txt
