@@ -1,79 +1,51 @@
-from pathlib import Path
-import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
 import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+import numpy as np
+from .model import model, device, max_seq_length
+from .data import training_data, evaluating_data
 
-from .data import padded_train_data
-from .model import model, checkpoint_path, num_tokens
+# Prepare data loaders
+train_dataset = TensorDataset(torch.tensor([x[0] for x in training_data], dtype=torch.long),
+                              torch.tensor([x[1] for x in training_data], dtype=torch.long))
+train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
 
-# Assuming `padded_train_data` is already loaded and preprocessed
-train_inputs = np.array(padded_train_data)
-train_dataset = TensorDataset(torch.tensor(train_inputs, dtype=torch.long))
-train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+# Loss function and optimizer
+criterion = nn.CrossEntropyLoss(ignore_index=10)  # ignore padding tokens
+optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
-# Set device to GPU if available, else CPU
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(f"Using device: {device}")
-
-num_epochs = 10
-checkpoint_interval = 1
-num_context_tokens = 1024
-num_pred_tokens = 1024
-
-# Our general plan is to load up 2048 tokens with a forward attention mask, then predict token by token
-# 
-
-def train(model, loader, num_epochs, checkpoint_interval, checkpoint_path, device):
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
-    criterion = nn.CrossEntropyLoss(ignore_index=10, label_smoothing=0.1)
+# Training loop
+num_epochs = 50
+for epoch in range(num_epochs):
+    model.train()
+    total_loss = 0
+    for batch_idx, (src, tgt) in enumerate(train_loader):
+        src, tgt = src.to(device), tgt.to(device)
+        
+        optimizer.zero_grad()
+        output = model(src, tgt[:, :-1])
+        loss = criterion(output.contiguous().view(-1, output.size(-1)), tgt[:, 1:].contiguous().view(-1))
+        loss.backward()
+        optimizer.step()
+        
+        total_loss += loss.item()
+        
+        # Print more detailed information
+        if batch_idx % 10 == 0:  # Print every 100 batches
+            print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
+            print("Predicted:", torch.argmax(output[0, 0, :10], dim=-1))
+            print("Softmax of output:", torch.softmax(output[0, 0, :10], dim=-1))
     
-    start_epoch = 0  # Default start epoch
+    avg_loss = total_loss / len(train_loader)
+    print(f'Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}')
 
-    # Load checkpoint if it exists
-    if checkpoint_path.exists():
-        checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = checkpoint['epoch']
-        print(f"Resuming training from epoch {start_epoch}")
-    else:
-        print("No checkpoint found, starting training from scratch.")
-
-    # Training loop
-    for epoch in range(start_epoch, start_epoch + num_epochs):
-        model.train()
-        for i, (src,) in enumerate(loader):
-            src = src.to(device)
-            output = model(src)
-            target = src[:, model.num_context_tokens:].reshape(-1)
-            loss = criterion(output.view(-1, num_tokens + 1), target.view(-1))
-
-            if torch.isnan(loss).any():
-                print(f"NaN loss detected at batch {i} of epoch {epoch}")
-                print("Output:", output)
-                print("Target:", target)
-                return  # Exit to avoid corrupting weights
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            
-            # Print more detailed information
-            if i % 10 == 0:  # Print every 100 batches
-                print(f"Epoch {epoch}, Batch {i}, Loss: {loss.item()}")
-                print("Output sample:", output[0, 0, :10])  # Print first 10 logits of first token
-                print("Target sample:", target[:10])  # Print first 10 target tokens
-                print("Predicted:", torch.argmax(output[0, 0, :10], dim=-1))
-                print("Softmax of output:", torch.softmax(output[0, 0, :10], dim=-1))
-
+    # Save checkpoint
     torch.save({
-        'epoch': epoch + 1,
+        'epoch': epoch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-        'loss': loss.item(),
-    }, checkpoint_path)
-    print(f"Checkpoint saved at epoch {epoch + 1}")
+        'loss': avg_loss,
+    }, f'checkpoint_epoch_{epoch+1}.pt')
 
-train(model, train_loader, num_epochs, checkpoint_interval, checkpoint_path, device)
+print("Training completed.")
