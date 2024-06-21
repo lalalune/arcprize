@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
-import random
 from .model import (
     model,
     device,
@@ -15,11 +14,7 @@ from .model import (
     nhead,
     num_layers,
     dim_feedforward,
-    max_seq_length,
-    max_context_length,
-    max_prediction_length,
     dropout_rate,
-    device
 )
 from .data import (
     NUM_TOKENS,
@@ -30,9 +25,9 @@ from .data import (
 )
 from torch.cuda.amp import autocast, GradScaler
 import wandb
-batch_size = 1
-if torch.cuda.is_available():
-    batch_size = 32
+from torch.nn import CrossEntropyLoss
+
+batch_size = 32 if torch.cuda.is_available() else 1
 accumulation_steps = 16  # Accumulate gradients over 16 batches
 use_amp = True  # Use Automatic Mixed Precision
 
@@ -57,29 +52,6 @@ if checkpoint_path.exists():
     print(f"Resuming from epoch {start_epoch}")
 
 
-class WeightedCrossEntropyLoss(nn.Module):
-    def __init__(self, num_classes, ignore_index=-100, zero_weight=0.1):
-        super().__init__()
-        self.num_classes = num_classes
-        self.ignore_index = ignore_index
-        self.zero_weight = zero_weight
-
-    def forward(self, input, target):
-        input = input.view(-1, self.num_classes + 1).float()  # Ensure input is float
-        target = target.view(-1)
-
-        log_probs = F.log_softmax(input, dim=1)
-
-        non_ignored_mask = target != self.ignore_index
-        weights = torch.ones_like(target, dtype=torch.float)
-        weights[target == 0] = self.zero_weight
-        weights[target == self.ignore_index] = 0
-
-        loss = -log_probs.gather(1, target.unsqueeze(1)).squeeze(1) * weights
-        return loss.sum() / non_ignored_mask.sum()
-
-
-
 def collate_fn(batch):
     src_list, tgt_list = zip(*batch)
     src_padded = torch.nn.utils.rnn.pad_sequence(
@@ -88,76 +60,69 @@ def collate_fn(batch):
         padding_value=PAD_TOKEN,
     )
     tgt_padded = torch.nn.utils.rnn.pad_sequence(
-        [
-            torch.tensor(tgt[:max_prediction_length], dtype=torch.long)
-            for tgt in tgt_list
-        ],
+        [torch.tensor(tgt[:max_prediction_length], dtype=torch.long) for tgt in tgt_list],
         batch_first=True,
         padding_value=PAD_TOKEN,
     )
-    src_lengths = torch.LongTensor(
-        [min(len(src), max_context_length) for src in src_list]
-    )
-    tgt_lengths = torch.LongTensor(
-        [min(len(tgt), max_prediction_length) for tgt in tgt_list]
-    )
-    return src_padded, tgt_padded, src_lengths, tgt_lengths
+    return src_padded, tgt_padded
 
-
-def train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader, teacher_forcing_ratio=1.0):
-    batch_size, max_len = tgt.shape
+def train_step(model, src, tgt, criterion):
+    print(f"Input shapes: src={src.shape}, tgt={tgt.shape}")  # Debugging shape of inputs
 
     with autocast(enabled=use_amp):
-        logits = model(src)  # Assuming model now outputs logits directly
-
-        logits = logits[:, :tgt.size(1), :]  # Ensure logits are the same length as targets
+        generated = model.generate(src, max_length=tgt.size(1))
+        print(f"Shape after generation: {generated.shape}")  # Shape after token generation
+        
+        # Ensure generated sequence is the same length as target
+        generated = generated[:, :tgt.size(1)]
+        
+        print(f"Shape after slicing to target length: {generated.shape}")  # Check shape after slicing
 
         # Flatten for cross-entropy loss
-        logits = logits.reshape(-1, NUM_TOKENS + 1)  # Reshape to [batch_size * sequence_length, NUM_TOKENS + 1]
-        tgt = tgt.view(-1)  # Flatten target
+        logits = generated.reshape(-1, NUM_TOKENS + 1).float()  # Reshape logits correctly
+        print(f"Logits reshaped for loss: {logits.shape}")  # Log reshaped logits shape
 
+        tgt = tgt.contiguous().view(-1)  # Flatten target
+        print(f"Target reshaped for loss: {tgt.shape}")  # Log reshaped target shape
+        
         # Calculate loss
         loss = criterion(logits, tgt)
+        print(f"Calculated loss: {loss.item()}")  # Output the loss
 
-    return logits, loss
-
+    return loss
 
 
 
 if __name__ == "__main__":
-    criterion = WeightedCrossEntropyLoss(
-        num_classes=NUM_TOKENS, ignore_index=PAD_TOKEN, zero_weight=0.1
-    )
+    criterion = CrossEntropyLoss(ignore_index=PAD_TOKEN)
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
-    # Training loop
+    
     num_epochs = 50
 
     wandb.init(project="hilbert_predictor", config={
-            "num_epochs": num_epochs,
-            "batch_size": batch_size,
-            "accumulation_steps": accumulation_steps,
-            "d_model": d_model,
-            "nhead": nhead,
-            "num_layers": num_layers,
-            "dim_feedforward": dim_feedforward,
-            "dropout_rate": dropout_rate,
-        })
-
+        "num_epochs": num_epochs,
+        "batch_size": batch_size,
+        "accumulation_steps": accumulation_steps,
+        "d_model": d_model,
+        "nhead": nhead,
+        "num_layers": num_layers,
+        "dim_feedforward": dim_feedforward,
+        "dropout_rate": dropout_rate,
+    })
 
     for epoch in range(start_epoch, num_epochs):
         model.train()
         total_loss = 0
         optimizer.zero_grad()
 
-        for batch_idx, (src, tgt, src_lengths, tgt_lengths) in enumerate(train_loader):
+        for batch_idx, (src, tgt) in enumerate(train_loader):
             src, tgt = src.to(device), tgt.to(device)
-            src_lengths, tgt_lengths = src_lengths.to(device), tgt_lengths.to(device)
 
             with autocast(enabled=use_amp):
-                generated_ids, loss = train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader)
+                loss = train_step(model, src, tgt, criterion)
 
             scaler.scale(loss).backward()
 
@@ -198,10 +163,8 @@ if __name__ == "__main__":
             },
             checkpoint_path,
         )
-        # Log epoch metrics to Wandb
+        
         wandb.log({"epoch": epoch+1, "avg_loss": avg_loss})
-
-        # Save model checkpoint to Wandb
         wandb.save(str(checkpoint_path))
 
     print("Training completed.")
