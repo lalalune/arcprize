@@ -2,12 +2,9 @@ import numpy as np
 import os
 import json
 from .gilbert2d import flatten_2d_to_1d
-import itertools
 import random
 import hashlib
-
-def example_to_hashable(example):
-    return hashlib.md5(str(example).encode()).hexdigest()
+from .transformations import identity, flip_horizontal, flip_vertical, rotate_180
 
 PAD_TOKEN = 10
 START_EXAMPLE_TOKEN = 11
@@ -15,22 +12,6 @@ END_EXAMPLE_TOKEN = 12
 START_SEQUENCE_TOKEN = 13
 END_SEQUENCE_TOKEN = 14
 NUM_TOKENS = 15
-
-def identity(x):
-    return x
-identity.is_identity = True
-
-def flip_horizontal(matrix):
-    return np.fliplr(matrix)
-flip_horizontal.is_identity = False
-
-def flip_vertical(matrix):
-    return np.flipud(matrix)
-flip_vertical.is_identity = False
-
-def rotate_180(matrix):
-    return np.rot90(matrix, 2)
-rotate_180.is_identity = False
 
 augmentation_functions = [
     identity,
@@ -63,7 +44,13 @@ def apply_token_mapping(example, mapping):
         "output": map_array(example["output"])
     }
 
+def is_valid_size(matrix):
+    return len(matrix) <= 16 and all(len(row) <= 16 for row in matrix)
+
 def generate_all_augmentations(example, num_augmentations=6):
+    if not is_valid_size(example['input']) or not is_valid_size(example['output']):
+        return []  # Skip this example if it's too large
+    
     augmentations = [example]  # Include the original, unaugmented example
     
     for _ in range(num_augmentations):
@@ -77,14 +64,15 @@ def generate_all_augmentations(example, num_augmentations=6):
         if random.random() < 0.5:  # 50% chance to flip input-output
             augmented = flip_input_output(augmented)
         
-        augmentations.append(augmented)
+        if is_valid_size(augmented['input']) and is_valid_size(augmented['output']):
+            augmentations.append(augmented)
     
     return augmentations
 
 def remove_zeros_from_sequence(sequence):
     return [x for x in sequence if x != 0]
 
-def generate_contexts(train_example, max_context_length=8192):
+def generate_contexts(train_example, max_context_length=4096):
     context = [START_SEQUENCE_TOKEN]
     unpadded_context = [START_SEQUENCE_TOKEN]
     
@@ -145,7 +133,8 @@ def load_and_process_training_data(file_paths, max_context_length=8192):
         unique_train_data = []
         unique_examples = set()
         for ex in all_train_data:
-            ex_hash = example_to_hashable(ex)
+            # Make a hash of the example to ensure uniqueness
+            ex_hash = hashlib.md5(str(ex).encode()).hexdigest()
             if ex_hash not in unique_examples:
                 unique_train_data.append(ex)
                 unique_examples.add(ex_hash)
@@ -249,8 +238,8 @@ evaluating_data_dir = "./data/evaluation"
 training_file_paths = [os.path.join(training_data_dir, f) for f in os.listdir(training_data_dir) if f.endswith('.json')]
 evaluating_file_paths = [os.path.join(evaluating_data_dir, f) for f in os.listdir(evaluating_data_dir) if f.endswith('.json')]
 
-training_data = load_and_process_training_data(training_file_paths)
-evaluating_data = load_and_process_eval_data(evaluating_file_paths)
+training_data = load_and_process_training_data(training_file_paths, max_context_length=4096)
+evaluating_data = load_and_process_eval_data(evaluating_file_paths, max_context_length=4096)
 
 # Save processed data
 np.save('processed_training_data.npy', training_data)

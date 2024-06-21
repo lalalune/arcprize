@@ -82,10 +82,17 @@ for epoch in range(num_epochs):
         total_loss += loss.item()
         
         # Print more detailed information
-        if batch_idx % 10 == 0:  # Print every 10 batches
+        if batch_idx % 100 == 0:  # Print every 10 batches
             print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
             print("Predicted:", torch.argmax(output[0, 0, :NUM_TOKENS], dim=-1))
             print("Softmax of output:", torch.softmax(output[0, 0, :NUM_TOKENS], dim=-1))
+            # Save checkpoint
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': loss.item(),
+            }, checkpoint_path)
     
     avg_loss = total_loss / len(train_loader)
     print(f'Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}')
