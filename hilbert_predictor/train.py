@@ -7,10 +7,7 @@ import numpy as np
 import random
 from .model import (
     model,
-    device,
     checkpoint_path,
-    max_context_length,
-    max_prediction_length,
     d_model,
     nhead,
     num_layers,
@@ -19,7 +16,8 @@ from .model import (
     max_context_length,
     max_prediction_length,
     dropout_rate,
-    device
+    device,
+    batch_size
 )
 from .data import (
     NUM_TOKENS,
@@ -30,9 +28,6 @@ from .data import (
 )
 from torch.cuda.amp import autocast, GradScaler
 import wandb
-batch_size = 1
-if torch.cuda.is_available():
-    batch_size = 32
 accumulation_steps = 16  # Accumulate gradients over 16 batches
 use_amp = True  # Use Automatic Mixed Precision
 
@@ -145,7 +140,6 @@ if __name__ == "__main__":
             "dim_feedforward": dim_feedforward,
             "dropout_rate": dropout_rate,
         })
-
 
     for epoch in range(start_epoch, num_epochs):
         model.train()

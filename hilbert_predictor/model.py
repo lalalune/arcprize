@@ -6,6 +6,21 @@ from xformers.components import MultiHeadDispatch
 from xformers.components.attention import AttentionConfig, ScaledDotProduct
 from .data import NUM_TOKENS, PAD_TOKEN
 
+# Model initialization
+batch_size = 1
+if torch.cuda.is_available():
+    batch_size = 32
+d_model = 64 # 512
+nhead = 4
+num_layers = 6
+dim_feedforward = 512 # 2048
+max_seq_length = 4096
+max_context_length = 3072
+max_prediction_length = 1024
+dropout_rate = 0.05
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+checkpoint_path = Path("checkpoint.pt")
+
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=4096):
         super().__init__()
@@ -46,6 +61,7 @@ class DecoderOnlyTransformer(nn.Module):
                 dim_model=d_model,
                 num_heads=nhead,
                 attention=attention,
+                
                 bias=True,
                 residual_dropout=dropout_rate,
             ),
@@ -61,13 +77,14 @@ class DecoderOnlyTransformer(nn.Module):
         })
 
 
-    def forward(self, x, attention_mask=None):
+    def forward(self, x):
         x = self.embedding(x) * math.sqrt(self.embedding.embedding_dim)
         x = self.pos_encoder(x)
         
         for layer in self.layers:
             x = layer['norm1'](x)
-            x = layer['self_attn'](query=x, key=x, value=x, att_mask=attention_mask)
+            # reshape the attention mask to match the shape
+            x = layer['self_attn'](query=x, key=x, value=x)
             x = layer['norm1'](x)  # Applying post-attention layer norm
             x = layer['ff'](x)
             x = layer['norm2'](x)
@@ -75,28 +92,4 @@ class DecoderOnlyTransformer(nn.Module):
         x = self.fc_out(x)  # Output layer that transforms features into logits
         return x
 
-
-    def generate(self, input_ids, max_length, temperature=1.0):
-        self.eval()
-        with torch.no_grad():
-            for _ in range(max_length - input_ids.size(1)):
-                attention_mask = torch.triu(torch.ones(input_ids.size(1), input_ids.size(1)), diagonal=1).bool().to(self.device)
-                outputs = self(input_ids, attention_mask=attention_mask)
-                next_token_logits = outputs[:, -1, :] / temperature
-                next_token = torch.multinomial(torch.softmax(next_token_logits, dim=-1), num_samples=1)
-                input_ids = torch.cat([input_ids, next_token], dim=-1)
-        return input_ids
-
-# Model initialization
-d_model = 512
-nhead = 4
-num_layers = 6
-dim_feedforward = 2048
-max_seq_length = 4096
-max_context_length = 3072
-max_prediction_length = 1024
-dropout_rate = 0.05
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-checkpoint_path = Path("checkpoint.pt")
 model = DecoderOnlyTransformer(NUM_TOKENS, d_model, nhead, num_layers, dim_feedforward, max_seq_length, dropout_rate, device)
