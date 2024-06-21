@@ -134,37 +134,30 @@ class DecoderOnlyTransformer(nn.Module):
         })
 
     def forward(self, src):
-        print(f"Input shape: {src.shape}")
         assert src.dim() == 2, f"Expected input to be 2D, but got {src.dim()}D"
         
         x = self.token_embedding(src)
-        print(f"After token embedding: {x.shape}")
         assert x.shape == (src.shape[0], src.shape[1], self.d_model), f"Expected shape {(src.shape[0], src.shape[1], self.d_model)}, but got {x.shape}"
         
         batch_size, seq_len, d_model = x.shape
         
         for i, layer in enumerate(self.layers):
-            print(f"Layer {i+1}")
             q, k, v = x, x, x
             
             q = q.permute(1, 0, 2)
             k = k.permute(1, 0, 2)
-            print(f"Before rotary embedding: q.shape = {q.shape}, k.shape = {k.shape}")
             assert q.shape == k.shape == (seq_len, batch_size, d_model), f"Expected shape {(seq_len, batch_size, d_model)}, but got q: {q.shape}, k: {k.shape}"
             
             q, k = self.rotary_emb(q, k)
-            print(f"After rotary embedding: q.shape = {q.shape}, k.shape = {k.shape}")
             assert q.shape == k.shape == (1, seq_len, batch_size, d_model), f"Expected shape {(1, seq_len, batch_size, d_model)}, but got q: {q.shape}, k: {k.shape}"
             
             q = q.squeeze(0).permute(1, 0, 2)
             k = k.squeeze(0).permute(1, 0, 2)
-            print(f"After permute back: q.shape = {q.shape}, k.shape = {k.shape}")
             assert q.shape == k.shape == (batch_size, seq_len, d_model), f"Expected shape {(batch_size, seq_len, d_model)}, but got q: {q.shape}, k: {k.shape}"
 
             q = q.squeeze().view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
             k = k.squeeze().view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
             v = v.squeeze().view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
-            print(f"Before self-attention: q.shape = {q.shape}, k.shape = {k.shape}, v.shape = {v.shape}")
             
             assert q.shape == k.shape == v.shape == (seq_len, batch_size, self.nhead, d_model // self.nhead), \
                 f"Expected shape {(seq_len, batch_size, self.nhead, d_model // self.nhead)}, but got q: {q.shape}, k: {k.shape}, v: {v.shape}"
@@ -173,29 +166,22 @@ class DecoderOnlyTransformer(nn.Module):
             k = k.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
             v = v.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
             
-            print(f"After permutation: q.shape = {q.shape}, k.shape = {k.shape}, v.shape = {v.shape}")
-
             attn_output = checkpoint(layer['self_attn'], q, k, v)
 
-            print(f"After self-attention: attn_output.shape = {attn_output.shape}")
             assert attn_output.shape == (batch_size, seq_len, d_model), \
                 f"Expected shape {(batch_size, seq_len, d_model)}, but got {attn_output.shape}"
             
             x = layer['norm1'](x + attn_output)
-            print(f"After first norm: x.shape = {x.shape}")
             assert x.shape == (batch_size, seq_len, d_model), f"Expected shape {(batch_size, seq_len, d_model)}, but got {x.shape}"
             
             ff_output = checkpoint(layer['ff'], x)
 
-            print(f"After feedforward: ff_output.shape = {ff_output.shape}")
             assert ff_output.shape == (batch_size, seq_len, d_model), f"Expected shape {(batch_size, seq_len, d_model)}, but got {ff_output.shape}"
             
             x = layer['norm2'](x + ff_output)
-            print(f"After second norm: x.shape = {x.shape}")
             assert x.shape == (batch_size, seq_len, d_model), f"Expected shape {(batch_size, seq_len, d_model)}, but got {x.shape}"
         
         output = self.fc_out(x)
-        print(f"Final output shape: {output.shape}")
         assert output.shape == (batch_size, seq_len, NUM_TOKENS + 1), f"Expected shape {(batch_size, seq_len, NUM_TOKENS + 1)}, but got {output.shape}"
         
         return output
