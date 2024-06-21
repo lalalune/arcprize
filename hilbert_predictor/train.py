@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
-from .model import model, device
+from .model import model, device, checkpoint_path
 from .data import NUM_TOKENS, PAD_TOKEN, training_data
 
 batch_size = 1 # you lose implicit regularization by doing this, but it will work on a macbook for testing
@@ -32,24 +32,37 @@ train_dataset = TensorDataset(torch.tensor([x[0] for x in training_data], dtype=
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
 # Loss function and optimizer
-criterion = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)  # ignore padding tokens
+optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
 
 class WeightedCrossEntropyLoss(nn.Module):
-    def __init__(self, ignore_index=-100):
+    def __init__(self, num_classes, ignore_index=-100, zero_weight=0.1):
         super().__init__()
+        self.num_classes = num_classes
         self.ignore_index = ignore_index
+        self.zero_weight = zero_weight
 
     def forward(self, input, target):
-        weight = torch.ones_like(target).float()
-        weight[target == 0] = 0.2  # Adjust this value to change the weight of 0 tokens
-        weight[target == self.ignore_index] = 0
+        # input shape: (batch_size, num_classes, sequence_length)
+        # target shape: (batch_size, sequence_length)
+        
+        log_probs = F.log_softmax(input, dim=1)
+        
+        # Create a mask for non-ignored indices
+        non_ignored_mask = target != self.ignore_index
+        
+        # Create a weight tensor based on the target values
+        weights = torch.ones_like(target, dtype=torch.float)
+        weights[target == 0] = self.zero_weight
+        weights[target == self.ignore_index] = 0
+        
+        # Calculate the loss
+        loss = -log_probs.gather(1, target.unsqueeze(1)).squeeze(1) * weights
+        
+        # Sum the loss and divide by the number of non-ignored elements
+        return loss.sum() / non_ignored_mask.sum()
 
-        return F.cross_entropy(input, target, weight=weight, ignore_index=self.ignore_index, reduction='sum') / weight.sum()
-
-criterion = WeightedCrossEntropyLoss(ignore_index=PAD_TOKEN)
-
-optimizer = optim.Adam(model.parameters(), lr=1e-4)
+criterion = WeightedCrossEntropyLoss(num_classes=NUM_TOKENS, ignore_index=PAD_TOKEN, zero_weight=0.1)
 
 # Training loop
 num_epochs = 50
@@ -61,8 +74,8 @@ for epoch in range(num_epochs):
         src_lengths, tgt_lengths = src_lengths.to(device), tgt_lengths.to(device)
         
         optimizer.zero_grad()
-        output = model(src, tgt[:, :-1], src_lengths, tgt_lengths)  # Remove [:, :-1] from tgt_lengths
-        loss = criterion(output.contiguous().view(-1, output.size(-1)), tgt[:, 1:].contiguous().view(-1))
+        output = model(src, tgt[:, :-1], src_lengths, tgt_lengths)
+        loss = criterion(output.transpose(1, 2), tgt[:, 1:])
         loss.backward()
         optimizer.step()
         
@@ -83,7 +96,8 @@ for epoch in range(num_epochs):
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'loss': avg_loss,
-    }, f'checkpoint_epoch_{epoch+1}.pt')
+    }, checkpoint_path)
 
 print("Training completed.")
+
 

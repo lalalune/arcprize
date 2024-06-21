@@ -43,8 +43,11 @@ class TransformerModel(nn.Module):
 
     @staticmethod
     def create_pad_mask(seq, lengths):
-        mask = torch.arange(seq.size(1))[None, :] >= lengths[:, None]
-        return mask.to(seq.device)
+        batch_size, max_len = seq.size()
+        device = seq.device
+        mask = torch.arange(max_len, device=device)[None, :] >= lengths[:, None]
+        return mask
+
     
     def forward(self, src, tgt=None, src_lengths=None, tgt_lengths=None):
         if src_lengths is not None:
@@ -91,7 +94,7 @@ class TransformerModel(nn.Module):
 d_model = 128
 nhead = 4
 num_layers = 6
-dim_feedforward = 512
+dim_feedforward = 1024
 max_seq_length = 8192
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

@@ -1,62 +1,27 @@
 import os
 import csv
-
-from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 from .gilbert2d import unflatten_1d_to_2d, gilbert2d
-from .data import padded_train_data, padded_test_data, evaluating_file_paths, PAD_TOKEN
-from .model import model, checkpoint_path, num_context_tokens, num_pred_tokens
+from .data import PAD_TOKEN, START_SEQUENCE_TOKEN, END_SEQUENCE_TOKEN, START_EXAMPLE_TOKEN, END_EXAMPLE_TOKEN, evaluating_file_paths
+from .model import model, checkpoint_path, device
 
-# Set device to GPU if available, else CPU
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(f"Using device: {device}")
-
-colors_rgb = {
-    0: (0x00, 0x00, 0x00),
-    1: (0x00, 0x74, 0xD9),
-    2: (0xFF, 0x41, 0x36),
-    3: (0x2E, 0xCC, 0x40),
-    4: (0xFF, 0xDC, 0x00),
-    5: (0xA0, 0xA0, 0xA0),
-    6: (0xF0, 0x12, 0xBE),
-    7: (0xFF, 0x85, 0x1B),
-    8: (0x7F, 0xDB, 0xFF),
-    9: (0x87, 0x0C, 0x25),
-}
-
-_float_colors = [tuple(c / 255 for c in col) for col in colors_rgb.values()]
-colormap = ListedColormap(_float_colors)
-        
-def evaluate(model, loader, device):
-    model.eval()
-    total_correct = 0
-    total_tokens = 0
-    with torch.no_grad():
-        for src in loader:
-            src = src[0].to(device)
-            output = model(src)
-            _, predicted = torch.max(output.data, -1)
-            
-            target = src[:, model.num_context_tokens:]
-            correct = (predicted == target).sum().item()
-            total_correct += correct
-            total_tokens += target.numel()
+def eval(checkpoint_path, device, filenames):
+    # Load the test data
+    test_data = np.load('processed_evaluating_data.npy', allow_pickle=True)
+    test_inputs = [item[0] for item in test_data]
+    test_targets = [item[1] for item in test_data]
     
-    accuracy = total_correct / total_tokens
-    return accuracy
-
-def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames):
-    test_inputs = np.array(padded_test_data)
-    test_dataset = TensorDataset(torch.tensor(test_inputs, dtype=torch.long))
+    test_dataset = TensorDataset(torch.tensor(test_inputs, dtype=torch.long),
+                                 torch.tensor(test_targets, dtype=torch.long))
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
+    # Load the model
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 
@@ -74,58 +39,73 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
         csvwriter.writerow(['Filename', 'Input', 'Predicted', 'Target', 'Completely Correct', 'Non-Zero Accuracy'])
 
         with torch.no_grad():
-            for batch, filename in zip(test_loader, filenames):
-                src = batch[0].to(device)
-                input_seq = src[:, :num_context_tokens]
-                target = src[:, num_context_tokens:num_context_tokens+num_pred_tokens]
+            for (src, tgt), filename in zip(test_loader, filenames):
+                src, tgt = src.to(device), tgt.to(device)
                 
-                output = model(input_seq)
+                # Generate output sequence
+                output = model(src)
                 _, predicted = torch.max(output.data, -1)
 
-                mask = target != PAD_TOKEN  # Exclude only padding tokens
-                predicted_no_pad = predicted[mask]
-                target_no_pad = target[mask]
+                # Find the end of the actual sequence (ignoring padding)
+                tgt_end_idx = (tgt == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[1][0]
+                pred_end_idx = (predicted == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[1]
+                pred_end_idx = pred_end_idx[0] if pred_end_idx.numel() > 0 else predicted.size(1)
                 
-                correct = (predicted_no_pad == target_no_pad).sum().item()
-                total_correct += correct
-                total_tokens += target_no_pad.numel()
+                # Extract the relevant parts of the sequences
+                predicted = predicted[:, :pred_end_idx]
+                target = tgt[:, :tgt_end_idx]
 
-                non_zero_mask = target_no_pad != 0
-                non_zero_correct = ((predicted_no_pad == target_no_pad) & non_zero_mask).sum().item()
+                # Remove special tokens
+                special_tokens = [PAD_TOKEN, START_SEQUENCE_TOKEN, END_SEQUENCE_TOKEN, START_EXAMPLE_TOKEN, END_EXAMPLE_TOKEN]
+                
+                def remove_special_tokens(seq):
+                    return [token for token in seq if token not in special_tokens]
+
+                predicted_clean = remove_special_tokens(predicted[0].cpu().tolist())
+                target_clean = remove_special_tokens(target[0].cpu().tolist())
+
+                # Convert back to tensors
+                predicted_clean = torch.tensor(predicted_clean, device=device)
+                target_clean = torch.tensor(target_clean, device=device)
+
+                # Truncate to the shorter length
+                min_len = min(len(predicted_clean), len(target_clean))
+                predicted_clean = predicted_clean[:min_len]
+                target_clean = target_clean[:min_len]
+
+                correct = (predicted_clean == target_clean).sum().item()
+                total_correct += correct
+                total_tokens += len(target_clean)
+
+                non_zero_mask = target_clean != 0
+                non_zero_correct = ((predicted_clean == target_clean) & non_zero_mask).sum().item()
                 total_non_zero_correct += non_zero_correct
                 total_non_zero_tokens += non_zero_mask.sum().item()
 
-                for i in range(src.size(0)):
-                    input_seq_np = input_seq[i].cpu().numpy()
-                    predicted_seq = predicted[i].cpu().numpy()
-                    target_seq = target[i].cpu().numpy()
+                input_seq = remove_special_tokens(src[0].cpu().tolist())
+                predicted_seq = predicted_clean.cpu().numpy()
+                target_seq = target_clean.cpu().numpy()
 
-                    input_seq_np = input_seq_np[input_seq_np != PAD_TOKEN]
-                    predicted_seq = predicted_seq[predicted_seq != PAD_TOKEN]
-                    target_seq = target_seq[target_seq != PAD_TOKEN]
-                    
-                    predicted_seq = predicted_seq[:len(target_seq)]
-                    
-                    is_completely_correct = np.array_equal(predicted_seq, target_seq)
-                    completely_correct += int(is_completely_correct)
-                    total_predictions += 1
-                    
-                    # Calculate non-zero accuracy for this prediction
-                    non_zero_mask = target_seq != 0
-                    non_zero_correct = np.sum((predicted_seq == target_seq) & non_zero_mask)
-                    non_zero_total = np.sum(non_zero_mask)
-                    non_zero_accuracy = non_zero_correct / non_zero_total if non_zero_total > 0 else 0
-                    
-                    csvwriter.writerow([filename, input_seq_np.tolist(), predicted_seq.tolist(), target_seq.tolist(), 
-                                        is_completely_correct, non_zero_accuracy])
-                    
-                    print(f"Input: {input_seq_np}")
-                    print(f"Predicted: {predicted_seq}")
-                    print(f"Target: {target_seq}")
-                    print(f"Completely correct: {is_completely_correct}")
-                    print(f"Non-zero accuracy: {non_zero_accuracy:.4f}")
+                is_completely_correct = np.array_equal(predicted_seq, target_seq)
+                completely_correct += int(is_completely_correct)
+                total_predictions += 1
+                
+                # Calculate non-zero accuracy for this prediction
+                non_zero_mask = target_seq != 0
+                non_zero_correct = np.sum((predicted_seq == target_seq) & non_zero_mask)
+                non_zero_total = np.sum(non_zero_mask)
+                non_zero_accuracy = non_zero_correct / non_zero_total if non_zero_total > 0 else 0
+                
+                csvwriter.writerow([filename, input_seq, predicted_seq.tolist(), target_seq.tolist(), 
+                                    is_completely_correct, non_zero_accuracy])
+                
+                print(f"Input: {input_seq}")
+                print(f"Predicted: {predicted_seq}")
+                print(f"Target: {target_seq}")
+                print(f"Completely correct: {is_completely_correct}")
+                print(f"Non-zero accuracy: {non_zero_accuracy:.4f}")
 
-                    plot_hilbert_curves(input_seq_np, predicted_seq, target_seq, i, filename)
+                plot_hilbert_curves(input_seq, predicted_seq, target_seq, 0, filename)
 
     overall_accuracy = total_correct / total_tokens if total_tokens > 0 else 0
     overall_non_zero_accuracy = total_non_zero_correct / total_non_zero_tokens if total_non_zero_tokens > 0 else 0
@@ -139,8 +119,12 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
     print(f"Percentage of Completely Correct Predictions: {completely_correct_percentage:.2f}%")
 
 def plot_hilbert_curves(input_seq, predicted_seq, target_seq, sample_index, filename):
+    # Convert input_seq to a list if it's not already
+    if not isinstance(input_seq, (list, np.ndarray)):
+        input_seq = [input_seq]
+    
     # Remove padding tokens (value PAD_TOKEN)
-    input_seq = input_seq[input_seq != PAD_TOKEN]
+    input_seq = [x for x in input_seq if x != PAD_TOKEN]
     predicted_seq = predicted_seq[predicted_seq != PAD_TOKEN]
     target_seq = target_seq[target_seq != PAD_TOKEN]
     
@@ -155,7 +139,7 @@ def plot_hilbert_curves(input_seq, predicted_seq, target_seq, sample_index, file
     target_width = int(np.ceil(len(target_seq) / target_height))
 
     # Unflatten the sequences into 2D grids
-    input_grid = unflatten_1d_to_2d(input_seq, input_width, input_height)
+    input_grid = unflatten_1d_to_2d(np.array(input_seq), input_width, input_height)
     predicted_grid = unflatten_1d_to_2d(predicted_seq, target_width, target_height)
     target_grid = unflatten_1d_to_2d(target_seq, target_width, target_height)
 
@@ -186,4 +170,4 @@ def unflatten_1d_to_2d(array_1d, width, height):
 # get the filename from the path without the extension
 filenames = [os.path.splitext(os.path.basename(f))[0] for f in evaluating_file_paths]
 
-eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames)
+eval(checkpoint_path, device, filenames)
