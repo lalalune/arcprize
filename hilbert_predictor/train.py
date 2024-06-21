@@ -6,19 +6,18 @@ from torch.utils.data import DataLoader, TensorDataset
 import torch.optim as optim
 
 from .data import padded_train_data
-from .model import model, checkpoint_path
+from .model import model, checkpoint_path, num_tokens
 
-num_tokens = 10
 # Assuming `padded_train_data` is already loaded and preprocessed
 train_inputs = np.array(padded_train_data)
 train_dataset = TensorDataset(torch.tensor(train_inputs, dtype=torch.long))
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
 
 # Set device to GPU if available, else CPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
-num_epochs = 5
+num_epochs = 10
 checkpoint_interval = 1
 num_context_tokens = 1024
 num_pred_tokens = 1024
@@ -69,15 +68,6 @@ def train(model, loader, num_epochs, checkpoint_interval, checkpoint_path, devic
                 print("Predicted:", torch.argmax(output[0, 0, :10], dim=-1))
                 print("Softmax of output:", torch.softmax(output[0, 0, :10], dim=-1))
 
-            # Save checkpoint at the interval
-            if (epoch + 1) % checkpoint_interval == 0:
-                torch.save({
-                    'epoch': epoch + 1,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'loss': loss.item(),
-                }, checkpoint_path)
-                print(f"Checkpoint saved at epoch {epoch + 1}")
     torch.save({
         'epoch': epoch + 1,
         'model_state_dict': model.state_dict(),

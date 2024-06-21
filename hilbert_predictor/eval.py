@@ -10,9 +10,8 @@ from matplotlib.colors import ListedColormap
 
 from .gilbert2d import unflatten_1d_to_2d, gilbert2d
 from .data import load_data, padded_train_data, padded_test_data, evaluating_file_paths
-from .model import TransformerModel, model, checkpoint_path, num_context_tokens, num_pred_tokens
+from .model import TransformerModel, model, checkpoint_path, num_context_tokens, num_pred_tokens, num_tokens
 
-num_tokens = 10
 # Assuming `padded_train_data` is already loaded and preprocessed
 train_inputs = np.array(padded_train_data)
 train_dataset = TensorDataset(torch.tensor(train_inputs, dtype=torch.long))
@@ -64,8 +63,7 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    model = TransformerModel(num_tokens=10, d_model=512, nhead=8, dim_feedforward=2048, num_layers=6,
-                             num_context_tokens=num_context_tokens, num_pred_tokens=num_pred_tokens, device=device)
+    
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 

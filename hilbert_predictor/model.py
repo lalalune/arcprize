@@ -3,6 +3,8 @@ import torch.nn as nn
 import numpy as np
 from pathlib import Path
 
+num_tokens = 12
+
 class TransformerModel(nn.Module):
     def __init__(self, num_tokens, d_model, nhead, dim_feedforward, num_layers, num_context_tokens, num_pred_tokens, device):
         super().__init__()
@@ -61,8 +63,6 @@ class TransformerModel(nn.Module):
 
         return output
 
-num_tokens = 10
-
 # Set device to GPU if available, else CPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
@@ -70,5 +70,5 @@ print(f"Using device: {device}")
 num_context_tokens = 1024
 num_pred_tokens = 1024
 checkpoint_path = Path("checkpoint.pt")
-model = TransformerModel(num_tokens=num_tokens, d_model=512, nhead=8, dim_feedforward=2048, num_layers=6,
+model = TransformerModel(num_tokens=num_tokens, d_model=256, nhead=8, dim_feedforward=1024, num_layers=4,
                          num_context_tokens=num_context_tokens, num_pred_tokens=num_pred_tokens, device=device)
