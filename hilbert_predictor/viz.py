@@ -3,7 +3,7 @@ import math
 from gilbert2d import *
 import numpy as np
 
-def unflatten_1d_to_2d_viz(array_1d, width, height):
+def unflatten_1d_to_2d_viz(array_1d, width=None, height=None):
     print(array_1d.shape)
     print(array_1d.shape[0]**0.5)
     val1 = int(math.ceil(array_1d.shape[0]**0.5))
