@@ -215,6 +215,6 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device):
 model = TransformerModel(num_tokens=num_tokens, d_model=512, nhead=8, dim_feedforward=2048, num_layers=6,
                          num_context_tokens=num_context_tokens, num_pred_tokens=num_pred_tokens, device=device)
 
-train(model, train_loader, num_epochs, checkpoint_interval, checkpoint_path, device)
+# train(model, train_loader, num_epochs, checkpoint_interval, checkpoint_path, device)
 
 eval(checkpoint_path, num_context_tokens, num_pred_tokens, device)
