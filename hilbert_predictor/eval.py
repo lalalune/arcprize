@@ -12,13 +12,6 @@ from .gilbert2d import unflatten_1d_to_2d, gilbert2d
 from .data import padded_train_data, padded_test_data, evaluating_file_paths, PAD_TOKEN
 from .model import model, checkpoint_path, num_context_tokens, num_pred_tokens
 
-# Assuming `padded_train_data` is already loaded and preprocessed
-train_inputs = np.array(padded_train_data)
-train_dataset = TensorDataset(torch.tensor(train_inputs, dtype=torch.long))
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-
-
-
 # Set device to GPU if available, else CPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")

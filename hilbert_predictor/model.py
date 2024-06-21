@@ -41,8 +41,17 @@ class TransformerModel(nn.Module):
         mask = torch.triu(torch.ones(size, size, device=self.device), diagonal=1).bool()
         return mask
 
-    def forward(self, src, tgt=None):
-        src_key_padding_mask = (src == PAD_TOKEN)
+    @staticmethod
+    def create_pad_mask(seq, lengths):
+        mask = torch.arange(seq.size(1))[None, :] >= lengths[:, None]
+        return mask.to(seq.device)
+    
+    def forward(self, src, tgt=None, src_lengths=None, tgt_lengths=None):
+        if src_lengths is not None:
+            src_key_padding_mask = self.create_pad_mask(src, src_lengths)
+        else:
+            src_key_padding_mask = (src == PAD_TOKEN)
+
         src_non_padding_mask = ~src_key_padding_mask
 
         src_embedded = self.embedding(src) * math.sqrt(self.embedding.embedding_dim)
@@ -52,7 +61,11 @@ class TransformerModel(nn.Module):
         if tgt is None:
             tgt = torch.zeros((src.size(0), self.max_seq_length), dtype=torch.long, device=self.device)
         
-        tgt_key_padding_mask = (tgt == PAD_TOKEN)
+        if tgt_lengths is not None:
+            tgt_key_padding_mask = self.create_pad_mask(tgt, tgt_lengths)
+        else:
+            tgt_key_padding_mask = (tgt == PAD_TOKEN)
+
         tgt_non_padding_mask = ~tgt_key_padding_mask
         tgt_embedded = self.embedding(tgt) * math.sqrt(self.embedding.embedding_dim)
         tgt_embedded = self.pos_encoder(tgt_embedded)
@@ -78,7 +91,7 @@ class TransformerModel(nn.Module):
 d_model = 128
 nhead = 4
 num_layers = 6
-dim_feedforward = 1024
+dim_feedforward = 512
 max_seq_length = 8192
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
