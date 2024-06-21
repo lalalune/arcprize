@@ -88,14 +88,14 @@ class DecoderOnlyTransformer(nn.Module):
         return input_ids
 
 # Model initialization
-d_model = 128
-nhead = 4
+d_model = 512
+nhead = 8
 num_layers = 6
-dim_feedforward = 512
+dim_feedforward = 2048
 max_seq_length = 4096
 max_context_length = 3072
 max_prediction_length = 1024
-dropout_rate = 0.1
+dropout_rate = 0.05
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 checkpoint_path = Path("checkpoint.pt")

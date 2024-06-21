@@ -23,7 +23,7 @@ from torch.cuda.amp import autocast, GradScaler
 
 batch_size = 1
 if torch.cuda.is_available():
-    batch_size = 32
+    batch_size = 128
 accumulation_steps = 16  # Accumulate gradients over 16 batches
 use_amp = True  # Use Automatic Mixed Precision
 
