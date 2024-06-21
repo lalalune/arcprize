@@ -19,23 +19,26 @@ class PositionalEncoding(nn.Module):
         return x + self.pe[:x.size(0)]
 
 class TransformerModel(nn.Module):
-    def __init__(self, num_tokens, d_model, nhead, num_layers, dim_feedforward, max_seq_length, device):
+    def __init__(self, num_tokens, d_model, nhead, num_layers, dim_feedforward, max_seq_length, dropout_rate, device):
         super().__init__()
         self.device = device
         self.max_seq_length = max_seq_length
         self.embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
         self.pos_encoder = PositionalEncoding(d_model, max_seq_length)
-        
+        self.layer_norm = nn.LayerNorm(d_model)  # Layer normalization after embeddings and positional encoding
         self.transformer = nn.Transformer(
             d_model=d_model,
             nhead=nhead,
             num_encoder_layers=num_layers,
             num_decoder_layers=num_layers,
             dim_feedforward=dim_feedforward,
+            dropout=dropout_rate,
             batch_first=True
         )
+        self.batch_norm = nn.BatchNorm1d(max_seq_length)  # Batch normalization for sequence length
         self.fc_out = nn.Linear(d_model, num_tokens + 1)
         self.to(device)
+
 
     def generate_square_subsequent_mask(self, size):
         mask = torch.triu(torch.ones(size, size, device=self.device), diagonal=1).bool()
@@ -96,7 +99,8 @@ nhead = 4
 num_layers = 6
 dim_feedforward = 1024
 max_seq_length = 8192
+dropout_rate = 0.1
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 checkpoint_path = Path("checkpoint.pt")
-model = TransformerModel(NUM_TOKENS, d_model, nhead, num_layers, dim_feedforward, max_seq_length, device)
+model = TransformerModel(NUM_TOKENS, d_model, nhead, num_layers, dim_feedforward, max_seq_length, dropout_rate, device)
