@@ -32,7 +32,7 @@ from torch.cuda.amp import autocast, GradScaler
 import wandb
 batch_size = 1
 if torch.cuda.is_available():
-    batch_size = 128
+    batch_size = 32
 accumulation_steps = 16  # Accumulate gradients over 16 batches
 use_amp = True  # Use Automatic Mixed Precision
 
@@ -106,20 +106,22 @@ def collate_fn(batch):
 
 def train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader, teacher_forcing_ratio=1.0):
     batch_size, max_len = tgt.shape
-    
+
     with autocast(enabled=use_amp):
         logits = model(src)  # Assuming model now outputs logits directly
-        
+
         logits = logits[:, :tgt.size(1), :]  # Ensure logits are the same length as targets
-        
+
         # Flatten for cross-entropy loss
-        logits = logits.view(-1, NUM_TOKENS + 1)  # Reshape to [batch_size * sequence_length, NUM_TOKENS + 1]
+        logits = logits.reshape(-1, NUM_TOKENS + 1)  # Reshape to [batch_size * sequence_length, NUM_TOKENS + 1]
         tgt = tgt.view(-1)  # Flatten target
-        
+
         # Calculate loss
         loss = criterion(logits, tgt)
 
     return logits, loss
+
+
 
 
 if __name__ == "__main__":
@@ -128,7 +130,7 @@ if __name__ == "__main__":
     )
 
     train_loader = DataLoader(
-        train_dataset, batch_size=1, shuffle=True, collate_fn=collate_fn
+        train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
     # Training loop
     num_epochs = 50
@@ -179,7 +181,6 @@ if __name__ == "__main__":
                     checkpoint_path,
                 )
 
-        # Perform the last optimization step if needed
         if (batch_idx + 1) % accumulation_steps != 0:
             scaler.step(optimizer)
             scaler.update()
@@ -197,5 +198,10 @@ if __name__ == "__main__":
             },
             checkpoint_path,
         )
+        # Log epoch metrics to Wandb
+        wandb.log({"epoch": epoch+1, "avg_loss": avg_loss})
+
+        # Save model checkpoint to Wandb
+        wandb.save(str(checkpoint_path))
 
     print("Training completed.")
