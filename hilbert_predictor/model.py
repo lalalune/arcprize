@@ -89,7 +89,7 @@ class DecoderOnlyTransformer(nn.Module):
 
 # Model initialization
 d_model = 512
-nhead = 8
+nhead = 4
 num_layers = 6
 dim_feedforward = 2048
 max_seq_length = 4096
