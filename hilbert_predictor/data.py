@@ -4,11 +4,15 @@ import json
 from .gilbert2d import flatten_2d_to_1d
 
 PAD_TOKEN = 10
-START_TOKEN = 11
-END_TOKEN = 12
+START_EXAMPLE_TOKEN = 11
+END_EXAMPLE_TOKEN = 12
+START_SEQUENCE_TOKEN = 13
+END_SEQUENCE_TOKEN = 14
+NUM_TOKENS = 15
 
 def load_and_process_data(file_paths, max_context_length=8192):
     processed_data = []
+    unpadded_strings = []
     
     for file_path in file_paths:
         with open(file_path, 'r') as f:
@@ -17,30 +21,51 @@ def load_and_process_data(file_paths, max_context_length=8192):
         train_examples = data['train']
         test_examples = data['test']
         
-        # Create combinations of train examples (1 to 4) for each test example
         for test_example in test_examples:
             for num_train_examples in range(1, min(5, len(train_examples) + 1)):
-                context = []
+                context = [START_SEQUENCE_TOKEN]
+                unpadded_context = [START_SEQUENCE_TOKEN]
+                
                 for train_example in train_examples[:num_train_examples]:
-                    context.extend(flatten_2d_to_1d(np.array(train_example['input'])))
-                    context.extend(flatten_2d_to_1d(np.array(train_example['output'])))
-                    context.append(END_TOKEN)
+                    context.append(START_EXAMPLE_TOKEN)
+                    unpadded_context.append(START_EXAMPLE_TOKEN)
+                    
+                    train_input = flatten_2d_to_1d(np.array(train_example['input']))
+                    train_output = flatten_2d_to_1d(np.array(train_example['output']))
+                    context.extend(train_input)
+                    context.extend(train_output)
+                    unpadded_context.extend(train_input)
+                    unpadded_context.extend(train_output)
+                    
+                    context.append(END_EXAMPLE_TOKEN)
+                    unpadded_context.append(END_EXAMPLE_TOKEN)
                 
-                # Add test input
-                context.extend(flatten_2d_to_1d(np.array(test_example['input'])))
-                context.append(START_TOKEN)
+                context.append(START_EXAMPLE_TOKEN)
+                unpadded_context.append(START_EXAMPLE_TOKEN)
+                test_input = flatten_2d_to_1d(np.array(test_example['input']))
+                context.extend(test_input)
+                unpadded_context.extend(test_input)
+                context.append(END_EXAMPLE_TOKEN)
+                unpadded_context.append(END_EXAMPLE_TOKEN)
                 
-                # Pad or truncate context to max_context_length
+                context.append(END_SEQUENCE_TOKEN)
+                unpadded_context.append(END_SEQUENCE_TOKEN)
+                
+                # Pad the context if necessary
                 if len(context) < max_context_length:
-                    context = [PAD_TOKEN] * (max_context_length - len(context)) + context
+                    context = context + [PAD_TOKEN] * (max_context_length - len(context))
                 else:
-                    context = context[-max_context_length:]
+                    context = context[:max_context_length]
                 
-                # Prepare target (test output)
-                target = flatten_2d_to_1d(np.array(test_example['output']))
-                target = np.pad(target, (0, max_context_length - len(target)), 'constant', constant_values=PAD_TOKEN)
+                target = [START_SEQUENCE_TOKEN] + flatten_2d_to_1d(np.array(test_example['output'])) + [END_SEQUENCE_TOKEN]
+                target = target + [PAD_TOKEN] * (max_context_length - len(target))
                 
-                processed_data.append((np.array(context), target))
+                processed_data.append((np.array(context), np.array(target)))
+                unpadded_strings.append(' '.join(map(str, unpadded_context)))
+    
+    with open('hilbert_data.txt', 'w') as f:
+        for string in unpadded_strings:
+            f.write(string + '\n')
     
     return processed_data
 

@@ -3,8 +3,13 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
-from .model import model, device, max_seq_length
-from .data import training_data, evaluating_data
+from .model import model, device
+from .data import NUM_TOKENS, PAD_TOKEN, training_data
+
+batch_size = 1 # you lose implicit regularization by doing this, but it will work on a macbook for testing
+if torch.cuda.is_available():
+    batch_size = 8 # this seems to fit on an a100 with 8192 context
+
 
 # Prepare data loaders
 train_dataset = TensorDataset(torch.tensor([x[0] for x in training_data], dtype=torch.long),
@@ -12,7 +17,7 @@ train_dataset = TensorDataset(torch.tensor([x[0] for x in training_data], dtype=
 train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
 
 # Loss function and optimizer
-criterion = nn.CrossEntropyLoss(ignore_index=10)  # ignore padding tokens
+criterion = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)  # ignore padding tokens
 optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
 # Training loop
@@ -32,10 +37,10 @@ for epoch in range(num_epochs):
         total_loss += loss.item()
         
         # Print more detailed information
-        if batch_idx % 10 == 0:  # Print every 100 batches
+        if batch_idx % NUM_TOKENS == 0:  # Print every 100 batches
             print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
-            print("Predicted:", torch.argmax(output[0, 0, :10], dim=-1))
-            print("Softmax of output:", torch.softmax(output[0, 0, :10], dim=-1))
+            print("Predicted:", torch.argmax(output[0, 0, :NUM_TOKENS], dim=-1))
+            print("Softmax of output:", torch.softmax(output[0, 0, :NUM_TOKENS], dim=-1))
     
     avg_loss = total_loss / len(train_loader)
     print(f'Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}')

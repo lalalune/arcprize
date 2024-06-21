@@ -1,7 +1,8 @@
 from termcolor import colored
 import math
-from gilbert2d import *
+from .gilbert2d import *
 import numpy as np
+from .data import PAD_TOKEN
 
 def unflatten_1d_to_2d_viz(array_1d, width=None, height=None):
     print(array_1d.shape)
@@ -12,7 +13,7 @@ def unflatten_1d_to_2d_viz(array_1d, width=None, height=None):
     expected_length = width * height
 
     if len(array_1d) < expected_length:
-        array_1d = np.pad(array_1d, (0, expected_length - len(array_1d)), constant_values=10)
+        array_1d = np.pad(array_1d, (0, expected_length - len(array_1d)), constant_values=PAD_TOKEN)
 
     array_2d = [[None] * width for _ in range(height)]
     for idx, (x, y) in enumerate(gilbert2d(width, height)):

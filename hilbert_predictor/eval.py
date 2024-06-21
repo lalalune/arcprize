@@ -9,8 +9,8 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
 
 from .gilbert2d import unflatten_1d_to_2d, gilbert2d
-from .data import load_data, padded_train_data, padded_test_data, evaluating_file_paths
-from .model import TransformerModel, model, checkpoint_path, num_context_tokens, num_pred_tokens, num_tokens
+from .data import padded_train_data, padded_test_data, evaluating_file_paths, PAD_TOKEN
+from .model import model, checkpoint_path, num_context_tokens, num_pred_tokens
 
 # Assuming `padded_train_data` is already loaded and preprocessed
 train_inputs = np.array(padded_train_data)
@@ -89,7 +89,7 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
                 output = model(input_seq)
                 _, predicted = torch.max(output.data, -1)
 
-                mask = target != 10  # Exclude only padding tokens
+                mask = target != PAD_TOKEN  # Exclude only padding tokens
                 predicted_no_pad = predicted[mask]
                 target_no_pad = target[mask]
                 
@@ -107,9 +107,9 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
                     predicted_seq = predicted[i].cpu().numpy()
                     target_seq = target[i].cpu().numpy()
 
-                    input_seq_np = input_seq_np[input_seq_np != 10]
-                    predicted_seq = predicted_seq[predicted_seq != 10]
-                    target_seq = target_seq[target_seq != 10]
+                    input_seq_np = input_seq_np[input_seq_np != PAD_TOKEN]
+                    predicted_seq = predicted_seq[predicted_seq != PAD_TOKEN]
+                    target_seq = target_seq[target_seq != PAD_TOKEN]
                     
                     predicted_seq = predicted_seq[:len(target_seq)]
                     
@@ -146,10 +146,10 @@ def eval(checkpoint_path, num_context_tokens, num_pred_tokens, device, filenames
     print(f"Percentage of Completely Correct Predictions: {completely_correct_percentage:.2f}%")
 
 def plot_hilbert_curves(input_seq, predicted_seq, target_seq, sample_index, filename):
-    # Remove padding tokens (value 10)
-    input_seq = input_seq[input_seq != 10]
-    predicted_seq = predicted_seq[predicted_seq != 10]
-    target_seq = target_seq[target_seq != 10]
+    # Remove padding tokens (value PAD_TOKEN)
+    input_seq = input_seq[input_seq != PAD_TOKEN]
+    predicted_seq = predicted_seq[predicted_seq != PAD_TOKEN]
+    target_seq = target_seq[target_seq != PAD_TOKEN]
     
     # Ensure predicted_seq is the same length as target_seq
     predicted_seq = predicted_seq[:len(target_seq)]
@@ -182,7 +182,7 @@ def plot_hilbert_curves(input_seq, predicted_seq, target_seq, sample_index, file
 
 # Update the unflatten_1d_to_2d function in gilbert2d.py:
 def unflatten_1d_to_2d(array_1d, width, height):
-    array_2d = np.full((height, width), 10)  # Fill with padding value
+    array_2d = np.full((height, width), PAD_TOKEN)  # Fill with padding value
     for idx, (x, y) in enumerate(gilbert2d(width, height)):
         if idx < len(array_1d):
             array_2d[y][x] = array_1d[idx]
