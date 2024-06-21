@@ -9,7 +9,7 @@ from .data import NUM_TOKENS, PAD_TOKEN, training_data
 
 batch_size = 1 # you lose implicit regularization by doing this, but it will work on a macbook for testing
 if torch.cuda.is_available():
-    batch_size = 8 # this seems to fit on an a100 with 8192 context
+    batch_size = 16 # this seems to fit on an a100 with 8192 context
 
 
 # Prepare data loaders

@@ -6,7 +6,7 @@ import math
 from .data import NUM_TOKENS, PAD_TOKEN
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=8192):
+    def __init__(self, d_model, max_len=4096):
         super().__init__()
         position = torch.arange(max_len).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
@@ -95,7 +95,7 @@ class TransformerModel(nn.Module):
 
 # Model initialization
 d_model = 128
-nhead = 4
+nhead = 8
 num_layers = 6
 dim_feedforward = 256
 max_seq_length = 4096
