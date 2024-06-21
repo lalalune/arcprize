@@ -4,7 +4,6 @@ from gilbert2d import *
 import numpy as np
 
 def unflatten_1d_to_2d_viz(array_1d, width, height):
-    # Calculate the expected length of the array
     print(array_1d.shape)
     print(array_1d.shape[0]**0.5)
     val1 = int(math.ceil(array_1d.shape[0]**0.5))
@@ -12,13 +11,12 @@ def unflatten_1d_to_2d_viz(array_1d, width, height):
     width = val1
     expected_length = width * height
 
-    # Pad array_1d with 10 (or another value) to match the expected length
     if len(array_1d) < expected_length:
         array_1d = np.pad(array_1d, (0, expected_length - len(array_1d)), constant_values=10)
 
     array_2d = [[None] * width for _ in range(height)]
     for idx, (x, y) in enumerate(gilbert2d(width, height)):
-        if idx < len(array_1d):  # Add boundary check
+        if idx < len(array_1d):  
             array_2d[y][x] = array_1d[idx]
 
     return array_2d
