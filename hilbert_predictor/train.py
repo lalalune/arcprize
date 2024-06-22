@@ -120,7 +120,6 @@ if __name__ == "__main__":
 
     if args.wandb:
         import wandb
-
         wandb.init(
             project="hilbert_predictor",
             config={
@@ -133,7 +132,15 @@ if __name__ == "__main__":
                 "dim_feedforward": dim_feedforward,
                 "dropout_rate": dropout_rate,
             },
+            resume="auto"
         )
+    if checkpoint_path.exists():
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        print(f"Resuming training from epoch {start_epoch}")
+
 
     for epoch in range(start_epoch, num_epochs):
         model.train()
@@ -159,17 +166,6 @@ if __name__ == "__main__":
             total_loss += loss.item()
 
             print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
-
-            if batch_idx % 100 == 0:
-                torch.save(
-                    {
-                        "epoch": epoch,
-                        "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        "loss": loss.item(),
-                    },
-                    checkpoint_path,
-                )
 
         if (batch_idx + 1) % accumulation_steps != 0:
             scaler.step(optimizer)
