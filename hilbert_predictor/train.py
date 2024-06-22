@@ -18,7 +18,7 @@ from .model import (
     max_prediction_length,
     dropout_rate,
     device,
-    batch_size
+    batch_size,
 )
 from .data import (
     NUM_TOKENS,
@@ -29,6 +29,7 @@ from .data import (
 )
 from torch.cuda.amp import autocast, GradScaler
 from torch.nn import CrossEntropyLoss
+
 
 def collate_fn(batch):
     src_list, tgt_list = zip(*batch)
@@ -54,14 +55,27 @@ def collate_fn(batch):
     return src_padded, tgt_padded, src_lengths, tgt_lengths
 
 
-def train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader, teacher_forcing_ratio=1.0):
+def train_step(
+    model,
+    src,
+    tgt,
+    src_lengths,
+    tgt_lengths,
+    criterion,
+    train_loader,
+    teacher_forcing_ratio=1.0,
+):
     with autocast(enabled=use_amp):
         logits = model(src)  # Assuming model now outputs logits directly
 
-        logits = logits[:, :tgt.size(1), :]  # Ensure logits are the same length as targets
+        logits = logits[
+            :, : tgt.size(1), :
+        ]  # Ensure logits are the same length as targets
 
         # Flatten for cross-entropy loss
-        logits = logits.reshape(-1, NUM_TOKENS + 1)  # Reshape to [batch_size * sequence_length, NUM_TOKENS + 1]
+        logits = logits.reshape(
+            -1, NUM_TOKENS + 1
+        )  # Reshape to [batch_size * sequence_length, NUM_TOKENS + 1]
         tgt = tgt.view(-1)  # Flatten target
 
         # Calculate loss
@@ -87,7 +101,9 @@ if __name__ == "__main__":
     # Load checkpoint if it exists
     start_epoch = 0
     parser = argparse.ArgumentParser(description="Train the model")
-    parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases logging")
+    parser.add_argument(
+        "--wandb", action="store_true", help="Enable Weights & Biases logging"
+    )
     args = parser.parse_args()
 
     criterion = CrossEntropyLoss(ignore_index=PAD_TOKEN)
@@ -104,16 +120,20 @@ if __name__ == "__main__":
 
     if args.wandb:
         import wandb
-        wandb.init(project="hilbert_predictor", config={
-            "num_epochs": num_epochs,
-            "batch_size": batch_size,
-            "accumulation_steps": accumulation_steps,
-            "d_model": d_model,
-            "nhead": nhead,
-            "num_layers": num_layers,
-            "dim_feedforward": dim_feedforward,
-            "dropout_rate": dropout_rate,
-        })
+
+        wandb.init(
+            project="hilbert_predictor",
+            config={
+                "num_epochs": num_epochs,
+                "batch_size": batch_size,
+                "accumulation_steps": accumulation_steps,
+                "d_model": d_model,
+                "nhead": nhead,
+                "num_layers": num_layers,
+                "dim_feedforward": dim_feedforward,
+                "dropout_rate": dropout_rate,
+            },
+        )
 
     for epoch in range(start_epoch, num_epochs):
         model.train()
@@ -125,7 +145,9 @@ if __name__ == "__main__":
             src_lengths, tgt_lengths = src_lengths.to(device), tgt_lengths.to(device)
 
             with autocast(enabled=use_amp):
-                generated_ids, loss = train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader)
+                generated_ids, loss = train_step(
+                    model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader
+                )
 
             scaler.scale(loss).backward()
 
@@ -169,7 +191,7 @@ if __name__ == "__main__":
 
         if args.wandb:
             # Log epoch metrics to Wandb
-            wandb.log({"epoch": epoch+1, "avg_loss": avg_loss})
+            wandb.log({"epoch": epoch + 1, "avg_loss": avg_loss})
 
             # Save model checkpoint to Wandb
             wandb.save(str(checkpoint_path))

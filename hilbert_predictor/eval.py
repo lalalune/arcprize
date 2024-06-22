@@ -16,10 +16,11 @@ from .data import (
     evaluating_file_paths,
 )
 from .model import model, checkpoint_path, device
+
 # import wandb
 
+
 def eval(checkpoint_path, device, filenames):
-    
 
     # Load the test data
     # wandb.init(project="hilbert_predictor", job_type="eval")
@@ -173,7 +174,7 @@ def eval(checkpoint_path, device, filenames):
     print(
         f"Percentage of Completely Correct Predictions: {completely_correct_percentage:.2f}%"
     )
-    
+
     # wandb.log({
     #     "overall_accuracy": overall_accuracy,
     #     "overall_non_zero_accuracy": overall_non_zero_accuracy,
