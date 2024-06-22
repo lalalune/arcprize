@@ -20,6 +20,11 @@ wandb login
 python -m hilbert_predictor.train --wandb
 ```
 
+Generating synthetic data with wavefunction collapse algorithm
+```
+python -m wfc.generator
+```
+
 ## NOTES:
 
 Tokens 0-9 are colors
