@@ -1,10 +1,10 @@
+from matplotlib import pyplot as plt
+
 import os
 import csv
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
 
 from .gilbert2d import unflatten_1d_to_2d, gilbert2d
 from .data import (
@@ -16,11 +16,13 @@ from .data import (
     evaluating_file_paths,
 )
 from .model import model, checkpoint_path, device
-import wandb
+# import wandb
 
 def eval(checkpoint_path, device, filenames):
+    
+
     # Load the test data
-    wandb.init(project="hilbert_predictor", job_type="eval")
+    # wandb.init(project="hilbert_predictor", job_type="eval")
     test_data = np.load("processed_evaluating_data.npy", allow_pickle=True)
     test_inputs = [item[0] for item in test_data]
     test_targets = [item[1] for item in test_data]
@@ -172,11 +174,11 @@ def eval(checkpoint_path, device, filenames):
         f"Percentage of Completely Correct Predictions: {completely_correct_percentage:.2f}%"
     )
     
-    wandb.log({
-        "overall_accuracy": overall_accuracy,
-        "overall_non_zero_accuracy": overall_non_zero_accuracy,
-        "completely_correct_percentage": completely_correct_percentage,
-    })
+    # wandb.log({
+    #     "overall_accuracy": overall_accuracy,
+    #     "overall_non_zero_accuracy": overall_non_zero_accuracy,
+    #     "completely_correct_percentage": completely_correct_percentage,
+    # })
 
 
 def plot_hilbert_curves(input_seq, predicted_seq, target_seq, sample_index, filename):
