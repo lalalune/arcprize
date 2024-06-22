@@ -5,6 +5,7 @@ class Pattern:
     """
     Pattern is a configuration of tiles from the input image.
     """
+
     index_to_pattern = {}
     color_to_index = {}
     index_to_color = {}
@@ -33,7 +34,7 @@ class Pattern:
         :param offset:
         :return: True if compatible
         """
-        assert (self.shape == candidate_pattern.shape)
+        assert self.shape == candidate_pattern.shape
 
         # Precomputed compatibility
         if offset in self.legal_patterns_index:
@@ -42,7 +43,12 @@ class Pattern:
         # Computing compatibility
         ok_constraint = True
         start = tuple([max(offset[i], 0) for i, _ in enumerate(offset)])
-        end = tuple([min(self.shape[i] + offset[i], self.shape[i]) for i, _ in enumerate(offset)])
+        end = tuple(
+            [
+                min(self.shape[i] + offset[i], self.shape[i])
+                for i, _ in enumerate(offset)
+            ]
+        )
         for index in np.ndindex(end):  # index = (x, y, z...)
             start_constraint = True
             for i, d in enumerate(index):
@@ -52,7 +58,9 @@ class Pattern:
             if not start_constraint:
                 continue
 
-            if candidate_pattern.get(tuple(np.array(index) - np.array(offset))) != self.get(index):
+            if candidate_pattern.get(
+                tuple(np.array(index) - np.array(offset))
+            ) != self.get(index):
                 ok_constraint = False
                 break
 
@@ -86,7 +94,9 @@ class Pattern:
             if out:
                 continue
 
-            pattern_location = [range(d, pattern_size[i] + d) for i, d in enumerate(index)]
+            pattern_location = [
+                range(d, pattern_size[i] + d) for i, d in enumerate(index)
+            ]
             pattern_data = sample[np.ix_(*pattern_location)]
 
             datas = [pattern_data, np.fliplr(pattern_data)]
@@ -141,7 +151,7 @@ class Pattern:
 
             sample_index[index] = Pattern.color_to_index[color]
 
-        print('Unique color count = ', color_number)
+        print("Unique color count = ", color_number)
         return sample_index
 
     @staticmethod

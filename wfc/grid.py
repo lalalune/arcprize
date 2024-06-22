@@ -62,5 +62,7 @@ class Grid:
         return False
 
     def print_allowed_pattern_count(self):
-        grid_allowed_patterns = np.vectorize(lambda c: len(c.allowed_patterns))(self.grid)
+        grid_allowed_patterns = np.vectorize(lambda c: len(c.allowed_patterns))(
+            self.grid
+        )
         print(grid_allowed_patterns)

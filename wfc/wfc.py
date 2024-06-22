@@ -1,3 +1,5 @@
+# From https://github.com/mxgmn/WaveFunctionCollapse
+
 import time
 
 from .grid import Grid
@@ -30,7 +32,7 @@ class WaveFunctionCollapse:
         print("WFC run took %s seconds" % (time.time() - start_time))
 
     def step(self):
-        self.grid.print_allowed_pattern_count()
+        # self.grid.print_allowed_pattern_count()
         cell = self.observe()
         if cell is None:
             return True
