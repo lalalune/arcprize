@@ -1,3 +1,4 @@
+
 import torch
 import torch.nn as nn
 import math
@@ -8,83 +9,15 @@ from .data import NUM_TOKENS, PAD_TOKEN
 from xformers.components.positional_embedding import RotaryEmbedding
 from torch.utils.checkpoint import checkpoint
 
-# Model initialization
-batch_size = 1
-if torch.cuda.is_available():
-    batch_size = 16
-d_model = 64 # 512
-nhead = 4
-num_layers = 6
-dim_feedforward = 512 # 2048
-max_seq_length = 4096
-max_context_length = 3072
-max_prediction_length = 1024
-dropout_rate = 0.05
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-checkpoint_path = Path("checkpoint.pt")
-
-class DecoderOnlyTransformer(nn.Module):
-    def __init__(self, num_tokens, d_model, nhead, num_layers, dim_feedforward, max_seq_length, dropout_rate, device):
-        super().__init__()
-        self.device = device
-        self.max_seq_length = max_seq_length
-        self.embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
-        # Token embedding layer
-        self.token_embedding = nn.Embedding(num_tokens, d_model, padding_idx=PAD_TOKEN)
-
-        # Rotary positional embedding
-        self.rotary_emb = RotaryEmbedding(d_model)
-        
-        self.layers = nn.ModuleList([
-            self.create_decoder_layer(d_model, nhead, dim_feedforward, dropout_rate)
-            for _ in range(num_layers)
-        ])
-        
-        self.fc_out = nn.Linear(d_model, num_tokens + 1)
-        self.to(device)
-
-    def create_decoder_layer(self, d_model, nhead, dim_feedforward, dropout_rate):
-        # Create the attention mechanism with causality directly if possible
-        attention = ScaledDotProduct(dropout=dropout_rate, causal=True)
-        
-        return nn.ModuleDict({
-            'self_attn': MultiHeadDispatch(
-                dim_model=d_model,
-                num_heads=nhead,
-                attention=attention,
-                
-                bias=True,
-                residual_dropout=dropout_rate,
-            ),
-            'ff': nn.Sequential(
-                nn.Linear(d_model, dim_feedforward),
-                nn.ReLU(),
-                nn.Dropout(dropout_rate),
-                nn.Linear(dim_feedforward, d_model),
-                nn.Dropout(dropout_rate),
-            ),
-            'norm1': nn.LayerNorm(d_model),
-            'norm2': nn.LayerNorm(d_model),
-        })
-
-
-    import torch
-import torch.nn as nn
-import math
-from pathlib import Path
-from xformers.components import MultiHeadDispatch
-from xformers.components.attention import AttentionConfig, ScaledDotProduct
-from .data import NUM_TOKENS, PAD_TOKEN
-from xformers.components.positional_embedding import RotaryEmbedding
 
 # Model initialization
 batch_size = 1
 if torch.cuda.is_available():
-    batch_size = 32
-d_model = 64 # 512
+    batch_size = 48
+d_model = 1024
 nhead = 4
 num_layers = 6
-dim_feedforward = 512 # 2048
+dim_feedforward = 2048      
 max_seq_length = 4096
 max_context_length = 3072
 max_prediction_length = 1024

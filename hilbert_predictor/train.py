@@ -55,8 +55,6 @@ def collate_fn(batch):
 
 
 def train_step(model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader, teacher_forcing_ratio=1.0):
-    batch_size, max_len = tgt.shape
-
     with autocast(enabled=use_amp):
         logits = model(src)  # Assuming model now outputs logits directly
 
