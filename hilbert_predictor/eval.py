@@ -18,6 +18,7 @@ from .data import (
 from .model import model, checkpoint_path, device
 import wandb
 
+
 def eval(checkpoint_path, device, filenames):
     # Load the test data
     wandb.init(project="hilbert_predictor", job_type="eval")
@@ -171,12 +172,14 @@ def eval(checkpoint_path, device, filenames):
     print(
         f"Percentage of Completely Correct Predictions: {completely_correct_percentage:.2f}%"
     )
-    
-    wandb.log({
-        "overall_accuracy": overall_accuracy,
-        "overall_non_zero_accuracy": overall_non_zero_accuracy,
-        "completely_correct_percentage": completely_correct_percentage,
-    })
+
+    wandb.log(
+        {
+            "overall_accuracy": overall_accuracy,
+            "overall_non_zero_accuracy": overall_non_zero_accuracy,
+            "completely_correct_percentage": completely_correct_percentage,
+        }
+    )
 
 
 def plot_hilbert_curves(input_seq, predicted_seq, target_seq, sample_index, filename):
