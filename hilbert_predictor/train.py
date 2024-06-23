@@ -205,6 +205,7 @@ if __name__ == "__main__":
 
             # print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
 
+        # If there are any accumulation steps left, do a final step
         if (batch_idx + 1) % accumulation_steps != 0:
             scaler.step(optimizer)
             scaler.update()
