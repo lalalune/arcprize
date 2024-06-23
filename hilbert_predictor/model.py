@@ -5,7 +5,6 @@ from pathlib import Path
 from xformers.components import MultiHeadDispatch
 from xformers.components.attention import AttentionConfig, ScaledDotProduct
 from .data import NUM_TOKENS, PAD_TOKEN
-from xformers.components.positional_embedding import RotaryEmbedding
 from torch.utils.checkpoint import checkpoint
 
 
@@ -74,7 +73,6 @@ class DecoderOnlyTransformer(nn.Module):
         self.nhead = nhead
         self.embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
         self.token_embedding = nn.Embedding(num_tokens, d_model, padding_idx=PAD_TOKEN)
-        self.rotary_emb = RotaryEmbedding(d_model)
 
         self.layers = nn.ModuleList(
             [
@@ -125,38 +123,9 @@ class DecoderOnlyTransformer(nn.Module):
         for i, layer in enumerate(self.layers):
             q, k, v = x, x, x
 
-            q = q.permute(1, 0, 2)
-            k = k.permute(1, 0, 2)
-            assert (
-                q.shape == k.shape == (seq_len, batch_size, d_model)
-            ), f"Expected shape {(seq_len, batch_size, d_model)}, but got q: {q.shape}, k: {k.shape}"
-
-            q, k = self.rotary_emb(q, k)
-            assert (
-                q.shape == k.shape == (1, seq_len, batch_size, d_model)
-            ), f"Expected shape {(1, seq_len, batch_size, d_model)}, but got q: {q.shape}, k: {k.shape}"
-
-            q = q.squeeze(0).permute(1, 0, 2)
-            k = k.squeeze(0).permute(1, 0, 2)
-            assert (
-                q.shape == k.shape == (batch_size, seq_len, d_model)
-            ), f"Expected shape {(batch_size, seq_len, d_model)}, but got q: {q.shape}, k: {k.shape}"
-
-            q = (
-                q.squeeze()
-                .view(batch_size, seq_len, self.nhead, -1)
-                .permute(1, 0, 2, 3)
-            )
-            k = (
-                k.squeeze()
-                .view(batch_size, seq_len, self.nhead, -1)
-                .permute(1, 0, 2, 3)
-            )
-            v = (
-                v.squeeze()
-                .view(batch_size, seq_len, self.nhead, -1)
-                .permute(1, 0, 2, 3)
-            )
+            q = q.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
+            k = k.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
+            v = v.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
 
             assert (
                 q.shape
@@ -219,3 +188,65 @@ model = DecoderOnlyTransformer(
     dropout_rate,
     device,
 )
+
+import torch
+from .model import (
+    DecoderOnlyTransformer,
+    NUM_TOKENS,
+    d_model,
+    nhead,
+    num_layers,
+    dim_feedforward,
+    max_seq_length,
+    dropout_rate,
+    device,
+    batch_size,
+)
+
+
+def test_model_with_zeros():
+    # Create a model instance
+    model = DecoderOnlyTransformer(
+        NUM_TOKENS,
+        d_model,
+        nhead,
+        num_layers,
+        dim_feedforward,
+        max_seq_length,
+        dropout_rate,
+        device,
+    )
+
+    # Create dummy input data (zeros)
+    dummy_input = torch.zeros((batch_size, max_seq_length), dtype=torch.long).to(device)
+
+    # Set the model to training mode
+    model.train()
+
+    # Create a dummy target (zeros)
+    dummy_target = torch.zeros((batch_size, max_seq_length), dtype=torch.long).to(
+        device
+    )
+
+    # Create an optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    # Define loss function
+    criterion = torch.nn.CrossEntropyLoss()
+
+    # Perform a forward pass
+    output = model(dummy_input)
+
+    # Calculate loss
+    loss = criterion(output.view(-1, NUM_TOKENS + 1), dummy_target.view(-1))
+
+    # Backward pass and optimization
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    print(f"Test completed. Loss: {loss.item()}")
+
+
+if __name__ == "__main__":
+    test_model_with_zeros()
