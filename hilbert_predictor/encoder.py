@@ -2,12 +2,14 @@ import torch
 import torch.nn as nn
 import math
 
+NUM_ENCODING_DIMENSIONS = 68
+
 class PositionEncoder(nn.Module):
     def __init__(self, max_height, max_width):
         super().__init__()
         self.max_height = max_height
         self.max_width = max_width
-        self.feature_dim = 68
+        self.feature_dim = NUM_ENCODING_DIMENSIONS
 
     def compute_encodings(self, height, width):
         encodings = torch.zeros(height, width, self.feature_dim)
@@ -39,36 +41,52 @@ class PositionEncoder(nn.Module):
         return encodings
 
     def forward(self, x, dimensions):
-        batch_size, seq_len = x.shape
+        if x.dim() == 3:
+            batch_size, seq_len, _ = x.shape
+        else:
+            raise ValueError(f"Expected input to be 3D, but got {x.dim()}D")
+
         height, width = dimensions
         encodings = self.compute_encodings(height, width)
         flattened_encodings = encodings.view(-1, self.feature_dim)
         
+        # Repeat the encodings to match the batch size and sequence length
+        repeated_encodings = flattened_encodings.unsqueeze(0).repeat(batch_size, 1, 1)
+        
+        # If the sequence length is longer than the flattened encodings, repeat to match
+        if seq_len > repeated_encodings.size(1):
+            repeated_encodings = repeated_encodings.repeat(1, math.ceil(seq_len / repeated_encodings.size(1)), 1)
+        
+        # Truncate to match the sequence length
+        repeated_encodings = repeated_encodings[:, :seq_len, :]
+        
         # Combine the original input with the position encodings
-        return torch.cat([x.unsqueeze(-1), flattened_encodings.repeat(batch_size, 1, 1)], dim=-1)
+        return torch.cat([x, repeated_encodings], dim=-1)
+
 
 def test_position_encoder():
     encoder = PositionEncoder(30, 30)
     
     # Test 1x1
-    x = torch.zeros(1, 1)
+    x = torch.zeros(1, 1, 1)  # Add an extra dimension for the embedding
     dimensions = (1, 1)
     output = encoder(x, dimensions)
     assert output.shape == (1, 1, 69), f"Incorrect output shape for 1x1: {output.shape}"
 
     # Test 5x5
-    x = torch.zeros(1, 25)
+    x = torch.zeros(1, 25, 1)  # Add an extra dimension for the embedding
     dimensions = (5, 5)
     output = encoder(x, dimensions)
     assert output.shape == (1, 25, 69), f"Incorrect output shape for 5x5: {output.shape}"
 
     # Test 30x30
-    x = torch.zeros(1, 900)
+    x = torch.zeros(1, 900, 1)  # Add an extra dimension for the embedding
     dimensions = (30, 30)
     output = encoder(x, dimensions)
     assert output.shape == (1, 900, 69), f"Incorrect output shape for 30x30: {output.shape}"
 
     print("All PositionEncoder tests passed.")
 
-# Run the test
-test_position_encoder()
+if __name__ == "__main__":
+    test_position_encoder()
+    

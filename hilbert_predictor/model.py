@@ -3,56 +3,22 @@ import torch.nn as nn
 import math
 from pathlib import Path
 from xformers.components import MultiHeadDispatch
-from xformers.components.attention import AttentionConfig, ScaledDotProduct
-from .data import NUM_TOKENS, PAD_TOKEN
+from xformers.components.attention import ScaledDotProduct
+from .data import NUM_TOKENS, PAD_TOKEN, MAX_CONTEXT_LENGTH, MAX_SEQUENCE_LENGTH, MAX_PREDICTION_LENGTH
 from torch.utils.checkpoint import checkpoint
-
+from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
 
 # Model initialization tiny
 batch_size = 1
 if torch.cuda.is_available():
-    batch_size = 256
-d_model = 16
+    batch_size = 32
+d_model = 512 - NUM_ENCODING_DIMENSIONS
 nhead = 8
-num_layers = 3
-dim_feedforward = 128
-max_seq_length = 384
-max_context_length = 256
-max_prediction_length = 128
-dropout_rate = 0.05
+num_layers = 12
+dim_feedforward = 2048
+dropout_rate = 0.1
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 checkpoint_path = Path("checkpoint.pt")
-
-# Model initialization small
-batch_size = 1
-if torch.cuda.is_available():
-    batch_size = 32
-d_model = 32
-nhead = 4
-num_layers = 4
-dim_feedforward = 256
-max_seq_length = 384
-max_context_length = 256
-max_prediction_length = 128
-dropout_rate = 0.05
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-checkpoint_path = Path("checkpoint_sm.pt")
-
-# Model initialization large
-# batch_size = 1
-# if torch.cuda.is_available():
-#     batch_size = 48
-# d_model = 1024
-# nhead = 4
-# num_layers = 6
-# dim_feedforward = 2048
-# max_seq_length = 4096
-# max_context_length = 3072
-# max_prediction_length = 1024
-# dropout_rate = 0.05
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# checkpoint_path = Path("checkpoint_lg.pt")
-
 
 class DecoderOnlyTransformer(nn.Module):
     def __init__(
@@ -62,17 +28,18 @@ class DecoderOnlyTransformer(nn.Module):
         nhead,
         num_layers,
         dim_feedforward,
-        max_seq_length,
+        MAX_SEQUENCE_LENGTH,
         dropout_rate,
         device,
     ):
         super().__init__()
         self.device = device
-        self.max_seq_length = max_seq_length
+        self.MAX_SEQUENCE_LENGTH = MAX_SEQUENCE_LENGTH
         self.d_model = d_model
         self.nhead = nhead
         self.embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
         self.token_embedding = nn.Embedding(num_tokens, d_model, padding_idx=PAD_TOKEN)
+        self.position_encoder = PositionEncoder(30, 30)
 
         self.layers = nn.ModuleList(
             [
@@ -81,34 +48,33 @@ class DecoderOnlyTransformer(nn.Module):
             ]
         )
 
-        self.fc_out = nn.Linear(d_model, num_tokens + 1)
+        self.fc_out = nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, num_tokens + 1)
         self.to(device)
 
     def create_decoder_layer(self, d_model, nhead, dim_feedforward, dropout_rate):
         attention = ScaledDotProduct(dropout=dropout_rate, causal=True)
-
         return nn.ModuleDict(
             {
                 "self_attn": MultiHeadDispatch(
-                    dim_model=d_model,
+                    dim_model=d_model + NUM_ENCODING_DIMENSIONS,
                     num_heads=nhead,
                     attention=attention,
                     bias=True,
                     residual_dropout=dropout_rate,
                 ),
                 "ff": nn.Sequential(
-                    nn.Linear(d_model, dim_feedforward),
+                    nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, dim_feedforward),
                     nn.ReLU(),
                     nn.Dropout(dropout_rate),
-                    nn.Linear(dim_feedforward, d_model),
+                    nn.Linear(dim_feedforward, d_model + NUM_ENCODING_DIMENSIONS),
                     nn.Dropout(dropout_rate),
                 ),
-                "norm1": nn.LayerNorm(d_model),
-                "norm2": nn.LayerNorm(d_model),
+                "norm1": nn.LayerNorm(d_model + NUM_ENCODING_DIMENSIONS),
+                "norm2": nn.LayerNorm(d_model + NUM_ENCODING_DIMENSIONS),
             }
         )
 
-    def forward(self, src):
+    def forward(self, src, dimensions):
         assert src.dim() == 2, f"Expected input to be 2D, but got {src.dim()}D"
 
         x = self.token_embedding(src)
@@ -118,7 +84,10 @@ class DecoderOnlyTransformer(nn.Module):
             self.d_model,
         ), f"Expected shape {(src.shape[0], src.shape[1], self.d_model)}, but got {x.shape}"
 
-        batch_size, seq_len, d_model = x.shape
+        # Add position encodings
+        x = self.position_encoder(x, dimensions)
+
+        batch_size, seq_len, _ = x.shape
 
         for i, layer in enumerate(self.layers):
             q, k, v = x, x, x
@@ -131,8 +100,8 @@ class DecoderOnlyTransformer(nn.Module):
                 q.shape
                 == k.shape
                 == v.shape
-                == (seq_len, batch_size, self.nhead, d_model // self.nhead)
-            ), f"Expected shape {(seq_len, batch_size, self.nhead, d_model // self.nhead)}, but got q: {q.shape}, k: {k.shape}, v: {v.shape}"
+                == (seq_len, batch_size, self.nhead, (self.d_model + NUM_ENCODING_DIMENSIONS) // self.nhead)
+            ), f"Expected shape {(seq_len, batch_size, self.nhead, (self.d_model + NUM_ENCODING_DIMENSIONS) // self.nhead)}, but got q: {q.shape}, k: {k.shape}, v: {v.shape}"
 
             q = q.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
             k = k.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
@@ -143,30 +112,30 @@ class DecoderOnlyTransformer(nn.Module):
             assert attn_output.shape == (
                 batch_size,
                 seq_len,
-                d_model,
-            ), f"Expected shape {(batch_size, seq_len, d_model)}, but got {attn_output.shape}"
+                self.d_model + NUM_ENCODING_DIMENSIONS,
+            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {attn_output.shape}"
 
             x = layer["norm1"](x + attn_output)
             assert x.shape == (
                 batch_size,
                 seq_len,
-                d_model,
-            ), f"Expected shape {(batch_size, seq_len, d_model)}, but got {x.shape}"
+                self.d_model + NUM_ENCODING_DIMENSIONS,
+            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {x.shape}"
 
             ff_output = checkpoint(layer["ff"], x)
 
             assert ff_output.shape == (
                 batch_size,
                 seq_len,
-                d_model,
-            ), f"Expected shape {(batch_size, seq_len, d_model)}, but got {ff_output.shape}"
+                self.d_model + NUM_ENCODING_DIMENSIONS,
+            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {ff_output.shape}"
 
             x = layer["norm2"](x + ff_output)
             assert x.shape == (
                 batch_size,
                 seq_len,
-                d_model,
-            ), f"Expected shape {(batch_size, seq_len, d_model)}, but got {x.shape}"
+                self.d_model + NUM_ENCODING_DIMENSIONS,
+            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {x.shape}"
 
         output = self.fc_out(x)
         assert output.shape == (
@@ -184,47 +153,24 @@ model = DecoderOnlyTransformer(
     nhead,
     num_layers,
     dim_feedforward,
-    max_seq_length,
+    MAX_SEQUENCE_LENGTH,
     dropout_rate,
     device,
-)
-
-import torch
-from .model import (
-    DecoderOnlyTransformer,
-    NUM_TOKENS,
-    d_model,
-    nhead,
-    num_layers,
-    dim_feedforward,
-    max_seq_length,
-    dropout_rate,
-    device,
-    batch_size,
 )
 
 
 def test_model_with_zeros():
-    # Create a model instance
-    model = DecoderOnlyTransformer(
-        NUM_TOKENS,
-        d_model,
-        nhead,
-        num_layers,
-        dim_feedforward,
-        max_seq_length,
-        dropout_rate,
-        device,
-    )
-
     # Create dummy input data (zeros)
-    dummy_input = torch.zeros((batch_size, max_seq_length), dtype=torch.long).to(device)
+    dummy_input = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(device)
+
+    # Create dummy dimensions
+    dummy_dimensions = (10, 10)  # Example dimensions
 
     # Set the model to training mode
     model.train()
 
     # Create a dummy target (zeros)
-    dummy_target = torch.zeros((batch_size, max_seq_length), dtype=torch.long).to(
+    dummy_target = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(
         device
     )
 
@@ -235,7 +181,7 @@ def test_model_with_zeros():
     criterion = torch.nn.CrossEntropyLoss()
 
     # Perform a forward pass
-    output = model(dummy_input)
+    output = model(dummy_input, dummy_dimensions)
 
     # Calculate loss
     loss = criterion(output.view(-1, NUM_TOKENS + 1), dummy_target.view(-1))
@@ -248,5 +194,37 @@ def test_model_with_zeros():
     print(f"Test completed. Loss: {loss.item()}")
 
 
+def test_position_encodings():
+    # Create dummy input data (zeros)
+    dummy_input = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(device)
+
+    # Create dummy dimensions
+    dummy_dimensions = (10, 10)  # Example dimensions
+
+    # Perform a forward pass
+    output = model(dummy_input, dummy_dimensions)
+
+    # Check if the output has the correct shape
+    assert output.shape == (
+        batch_size,
+        MAX_SEQUENCE_LENGTH,
+        NUM_TOKENS + 1,
+    ), f"Expected shape {(batch_size, MAX_SEQUENCE_LENGTH, NUM_TOKENS + 1)}, but got {output.shape}"
+
+    # Check if the position encodings are not all zeros
+    assert not torch.allclose(output[:, :, :-1], torch.zeros_like(output[:, :, :-1])), "Position encodings are all zeros"
+
+    print("Position encodings test passed.")
+
+def count_parameters(model):
+    total_params = 0
+    for param in model.parameters():
+        total_params += param.numel()
+    return total_params
+
 if __name__ == "__main__":
+    total_params = count_parameters(model)
+    print(f"Total parameters: {total_params}")
     test_model_with_zeros()
+    test_position_encodings()
+    
