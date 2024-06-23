@@ -1,10 +1,8 @@
+import os
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-import numpy as np
-import random
 import argparse
 from .model import (
     model,
@@ -22,13 +20,40 @@ from .model import (
 from .data import (
     NUM_TOKENS,
     PAD_TOKEN,
-    START_SEQUENCE_TOKEN,
-    END_SEQUENCE_TOKEN,
     training_data,
 )
 from torch.cuda.amp import autocast, GradScaler
 from torch.nn import CrossEntropyLoss
+from collections import deque
+from typing import Dict, Optional, Literal
 
+def gradfilter_ma(
+    m: nn.Module,
+    grads: Optional[Dict[str, deque]] = None,
+    window_size: int = 100,
+    lamb: float = 5.0,
+    filter_type: Literal['mean', 'sum'] = 'mean',
+    warmup: bool = True,
+    trigger: bool = False, # For ablation study.
+) -> Dict[str, deque]:
+    if grads is None:
+        grads = {n: deque(maxlen=window_size) for n, p in m.named_parameters() if p.requires_grad and p.grad is not None}
+
+    for n, p in m.named_parameters():
+        if p.requires_grad and p.grad is not None:
+            grads[n].append(p.grad.data.detach()) # .cpu())
+
+            # Modify the gradients.
+            if not warmup or len(grads[n]) == window_size and not trigger:
+                if filter_type == "mean":
+                    avg = sum(grads[n]) / len(grads[n])
+                elif filter_type == "sum":
+                    avg = sum(grads[n])
+                else:
+                    raise ValueError(f"Unrecognized filter_type {filter_type}")
+                p.grad.data = p.grad.data + avg * lamb
+
+    return grads
 
 def collate_fn(batch):
     src_list, tgt_list = zip(*batch)
@@ -85,6 +110,8 @@ def train_step(
 
 
 if __name__ == "__main__":
+    start_epoch = 0
+    grads = None
     accumulation_steps = 16  # Accumulate gradients over 16 batches
     use_amp = True  # Use Automatic Mixed Precision
     print("Training the model.")
@@ -97,6 +124,14 @@ if __name__ == "__main__":
 
     # Loss function and optimizer
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    if os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        grads = checkpoint.get('grads', None)
+        
+        
     scaler = GradScaler(enabled=use_amp)
 
     # Load checkpoint if it exists
@@ -158,6 +193,8 @@ if __name__ == "__main__":
                 )
 
             scaler.scale(loss).backward()
+            
+            grads = gradfilter_ma(model, grads=grads)
 
             if (batch_idx + 1) % accumulation_steps == 0:
                 scaler.step(optimizer)
@@ -168,6 +205,7 @@ if __name__ == "__main__":
 
             # print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
 
+        # If there are any accumulation steps left, do a final step
         if (batch_idx + 1) % accumulation_steps != 0:
             scaler.step(optimizer)
             scaler.update()
@@ -181,7 +219,8 @@ if __name__ == "__main__":
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "loss": avg_loss,
+                "loss": loss.item(),
+                "grads": grads,  # Add this line
             },
             checkpoint_path,
         )
