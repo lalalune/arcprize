@@ -159,6 +159,14 @@ def pad_sequence(sequence, max_length, pad_value, left_pad=False):
     else:
         return np.pad(sequence, (0, padding_length), mode='constant', constant_values=pad_value)
 
+def find_json_files(directory):
+    json_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.json'):
+                json_files.append(os.path.join(root, file))
+    return json_files
+
 def process_data(data_list):
     processed_data = []
     for data in data_list:
@@ -228,8 +236,10 @@ def load_and_process_training_data(file_paths):
 
 # Rest of the code remains the same
 training_data_dir = "./data/training"
+additional_training_data_dir = "./data/additional_training"
 evaluating_data_dir = "./data/evaluation"
 
+# if 
 training_file_paths = [
     os.path.join(training_data_dir, f)
     for f in os.listdir(training_data_dir)
@@ -240,6 +250,21 @@ evaluating_file_paths = [
     for f in os.listdir(evaluating_data_dir)
     if f.endswith(".json")
 ]
+
+# Check for arc-datasets folder
+arc_datasets_dir = os.path.join(os.path.dirname(training_data_dir), "../", "arc-datasets")
+if os.path.exists(arc_datasets_dir):
+    datasets_dir = os.path.join(arc_datasets_dir, "datasets")
+    if os.path.exists(datasets_dir):
+        print("Found arc-datasets folder. Adding files...")
+        additional_files = find_json_files(datasets_dir)
+        training_file_paths.extend(additional_files)
+        print(f"Added {len(additional_files)} files from arc-datasets")
+    else:
+        print("arc-datasets folder found, but 'datasets' subdirectory not found.")
+else:
+    print("arc-datasets folder not found. Proceeding with original data only.")
+    print("arc_datasets_dir", arc_datasets_dir)
 
 # Check if processed data files exist
 processed_training_file = "processed_training_data.pkl"

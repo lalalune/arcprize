@@ -39,7 +39,7 @@ class DecoderOnlyTransformer(nn.Module):
         self.nhead = nhead
         self.embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
         self.token_embedding = nn.Embedding(num_tokens, d_model, padding_idx=PAD_TOKEN)
-        self.position_encoder = PositionEncoder(30, 30)
+        self.position_encoder = PositionEncoder(30, 30, device=device)
 
         self.layers = nn.ModuleList(
             [
@@ -227,4 +227,3 @@ if __name__ == "__main__":
     print(f"Total parameters: {total_params}")
     test_model_with_zeros()
     test_position_encodings()
-    

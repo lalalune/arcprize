@@ -1,230 +1,98 @@
 import torch
 import torch.nn as nn
 import math
-from pathlib import Path
-from xformers.components import MultiHeadDispatch
-from xformers.components.attention import ScaledDotProduct
-from .data import NUM_TOKENS, PAD_TOKEN, MAX_CONTEXT_LENGTH, MAX_SEQUENCE_LENGTH, MAX_PREDICTION_LENGTH
-from torch.utils.checkpoint import checkpoint
-from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
 
-# Model initialization tiny
-batch_size = 1
-if torch.cuda.is_available():
-    batch_size = 32
-d_model = 512 - NUM_ENCODING_DIMENSIONS
-nhead = 8
-num_layers = 12
-dim_feedforward = 2048
-dropout_rate = 0.1
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-checkpoint_path = Path("checkpoint.pt")
+NUM_ENCODING_DIMENSIONS = 68
 
-class DecoderOnlyTransformer(nn.Module):
-    def __init__(
-        self,
-        num_tokens,
-        d_model,
-        nhead,
-        num_layers,
-        dim_feedforward,
-        MAX_SEQUENCE_LENGTH,
-        dropout_rate,
-        device,
-    ):
+class PositionEncoder(nn.Module):
+    def __init__(self, max_height, max_width, device):
         super().__init__()
+        self.max_height = max_height
+        self.max_width = max_width
+        self.feature_dim = NUM_ENCODING_DIMENSIONS
         self.device = device
-        self.MAX_SEQUENCE_LENGTH = MAX_SEQUENCE_LENGTH
-        self.d_model = d_model
-        self.nhead = nhead
-        self.embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
-        self.token_embedding = nn.Embedding(num_tokens, d_model, padding_idx=PAD_TOKEN)
-        self.position_encoder = PositionEncoder(30, 30, device=device)
-
-        self.layers = nn.ModuleList(
-            [
-                self.create_decoder_layer(d_model, nhead, dim_feedforward, dropout_rate)
-                for _ in range(num_layers)
-            ]
-        )
-
-        self.fc_out = nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, num_tokens + 1)
-        self.to(device)
-
-    def create_decoder_layer(self, d_model, nhead, dim_feedforward, dropout_rate):
-        attention = ScaledDotProduct(dropout=dropout_rate, causal=True)
-        return nn.ModuleDict(
-            {
-                "self_attn": MultiHeadDispatch(
-                    dim_model=d_model + NUM_ENCODING_DIMENSIONS,
-                    num_heads=nhead,
-                    attention=attention,
-                    bias=True,
-                    residual_dropout=dropout_rate,
-                ),
-                "ff": nn.Sequential(
-                    nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, dim_feedforward),
-                    nn.ReLU(),
-                    nn.Dropout(dropout_rate),
-                    nn.Linear(dim_feedforward, d_model + NUM_ENCODING_DIMENSIONS),
-                    nn.Dropout(dropout_rate),
-                ),
-                "norm1": nn.LayerNorm(d_model + NUM_ENCODING_DIMENSIONS),
-                "norm2": nn.LayerNorm(d_model + NUM_ENCODING_DIMENSIONS),
-            }
-        )
-
-    def forward(self, src, dimensions):
-        assert src.dim() == 2, f"Expected input to be 2D, but got {src.dim()}D"
-
-        x = self.token_embedding(src)
-        assert x.shape == (
-            src.shape[0],
-            src.shape[1],
-            self.d_model,
-        ), f"Expected shape {(src.shape[0], src.shape[1], self.d_model)}, but got {x.shape}"
-
-        # Add position encodings
-        x = self.position_encoder(x, dimensions)
-
-        batch_size, seq_len, _ = x.shape
-
-        for i, layer in enumerate(self.layers):
-            q, k, v = x, x, x
-
-            q = q.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
-            k = k.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
-            v = v.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
-
-            assert (
-                q.shape
-                == k.shape
-                == v.shape
-                == (seq_len, batch_size, self.nhead, (self.d_model + NUM_ENCODING_DIMENSIONS) // self.nhead)
-            ), f"Expected shape {(seq_len, batch_size, self.nhead, (self.d_model + NUM_ENCODING_DIMENSIONS) // self.nhead)}, but got q: {q.shape}, k: {k.shape}, v: {v.shape}"
-
-            q = q.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
-            k = k.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
-            v = v.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
-
-            attn_output = checkpoint(layer["self_attn"], q, k, v)
-
-            assert attn_output.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {attn_output.shape}"
-
-            x = layer["norm1"](x + attn_output)
-            assert x.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {x.shape}"
-
-            ff_output = checkpoint(layer["ff"], x)
-
-            assert ff_output.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {ff_output.shape}"
-
-            x = layer["norm2"](x + ff_output)
-            assert x.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {x.shape}"
-
-        output = self.fc_out(x)
-        assert output.shape == (
-            batch_size,
-            seq_len,
-            NUM_TOKENS + 1,
-        ), f"Expected shape {(batch_size, seq_len, NUM_TOKENS + 1)}, but got {output.shape}"
-
-        return output
 
 
-model = DecoderOnlyTransformer(
-    NUM_TOKENS,
-    d_model,
-    nhead,
-    num_layers,
-    dim_feedforward,
-    MAX_SEQUENCE_LENGTH,
-    dropout_rate,
-    device,
-)
+    def compute_encodings(self, height, width):
+        encodings = torch.zeros(height, width, self.feature_dim)
+        for y in range(height):
+            for x in range(width):
+                # X and Y linear fractions
+                encodings[y, x, 0] = 2 * (x / (width - 1)) - 1 if width > 1 else 0
+                encodings[y, x, 1] = 2 * (y / (height - 1)) - 1 if height > 1 else 0
+
+                # Quadrant encoding
+                encodings[y, x, 2] = -1 if x < width / 2 else (1 if x > width / 2 else 0)
+                encodings[y, x, 3] = -1 if y < height / 2 else (1 if y > height / 2 else 0)
+
+                # Trigonometric encodings
+                angle_x = math.pi * (x / (width - 1)) if width > 1 else 0
+                angle_y = math.pi * (y / (height - 1)) if height > 1 else 0
+                encodings[y, x, 4] = math.sin(angle_x)
+                encodings[y, x, 5] = math.sin(angle_y)
+                encodings[y, x, 6] = math.cos(angle_x)
+                encodings[y, x, 7] = math.cos(angle_y)
+                encodings[y, x, 8] = round(math.tan(angle_x)) if not math.isnan(math.tan(angle_x)) else 0
+                encodings[y, x, 9] = round(math.tan(angle_y)) if not math.isnan(math.tan(angle_y)) else 0
+
+                # One-hot encoding (adjusted to fit within 68 dimensions)
+                if x < 29 and y < 29:
+                    encodings[y, x, 10 + x] = 1
+                    encodings[y, x, 39 + y] = 1
+
+        return encodings
 
 
-def test_model_with_zeros():
-    # Create dummy input data (zeros)
-    dummy_input = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(device)
+    def forward(self, x, dimensions):
+        if x.dim() == 3:
+            batch_size, seq_len, _ = x.shape
+        else:
+            raise ValueError(f"Expected input to be 3D, but got {x.dim()}D")
 
-    # Create dummy dimensions
-    dummy_dimensions = (10, 10)  # Example dimensions
-
-    # Set the model to training mode
-    model.train()
-
-    # Create a dummy target (zeros)
-    dummy_target = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(
-        device
-    )
-
-    # Create an optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-    # Define loss function
-    criterion = torch.nn.CrossEntropyLoss()
-
-    # Perform a forward pass
-    output = model(dummy_input, dummy_dimensions)
-
-    # Calculate loss
-    loss = criterion(output.view(-1, NUM_TOKENS + 1), dummy_target.view(-1))
-
-    # Backward pass and optimization
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-
-    print(f"Test completed. Loss: {loss.item()}")
+        height, width = dimensions
+        encodings = self.compute_encodings(height, width)
+        flattened_encodings = encodings.view(-1, self.feature_dim)
+        
+        # Repeat the encodings to match the batch size and sequence length
+        repeated_encodings = flattened_encodings.unsqueeze(0).repeat(batch_size, 1, 1)
+        
+        # If the sequence length is longer than the flattened encodings, repeat to match
+        if seq_len > repeated_encodings.size(1):
+            repeated_encodings = repeated_encodings.repeat(1, math.ceil(seq_len / repeated_encodings.size(1)), 1)
+        
+        # Truncate to match the sequence length
+        repeated_encodings = repeated_encodings[:, :seq_len, :]
+        
+        # Move the repeated_encodings to the same device as the input tensor x
+        repeated_encodings = repeated_encodings.to(x.device)
+        
+        # Combine the original input with the position encodings
+        return torch.cat([x, repeated_encodings], dim=-1)
 
 
-def test_position_encodings():
-    # Create dummy input data (zeros)
-    dummy_input = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(device)
+def test_position_encoder():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    encoder = PositionEncoder(30, 30, device)
+    
+    # Test 1x1
+    x = torch.zeros(1, 1, 1, device=device)  # Add an extra dimension for the embedding
+    dimensions = (1, 1)
+    output = encoder(x, dimensions)
+    assert output.shape == (1, 1, 69), f"Incorrect output shape for 1x1: {output.shape}"
 
-    # Create dummy dimensions
-    dummy_dimensions = (10, 10)  # Example dimensions
+    # Test 5x5
+    x = torch.zeros(1, 25, 1, device=device)  # Add an extra dimension for the embedding
+    dimensions = (5, 5)
+    output = encoder(x, dimensions)
+    assert output.shape == (1, 25, 69), f"Incorrect output shape for 5x5: {output.shape}"
 
-    # Perform a forward pass
-    output = model(dummy_input, dummy_dimensions)
+    # Test 30x30
+    x = torch.zeros(1, 900, 1, device=device)  # Add an extra dimension for the embedding
+    dimensions = (30, 30)
+    output = encoder(x, dimensions)
+    assert output.shape == (1, 900, 69), f"Incorrect output shape for 30x30: {output.shape}"
 
-    # Check if the output has the correct shape
-    assert output.shape == (
-        batch_size,
-        MAX_SEQUENCE_LENGTH,
-        NUM_TOKENS + 1,
-    ), f"Expected shape {(batch_size, MAX_SEQUENCE_LENGTH, NUM_TOKENS + 1)}, but got {output.shape}"
-
-    # Check if the position encodings are not all zeros
-    assert not torch.allclose(output[:, :, :-1], torch.zeros_like(output[:, :, :-1])), "Position encodings are all zeros"
-
-    print("Position encodings test passed.")
-
-def count_parameters(model):
-    total_params = 0
-    for param in model.parameters():
-        total_params += param.numel()
-    return total_params
+    print("All PositionEncoder tests passed.")
 
 if __name__ == "__main__":
-    total_params = count_parameters(model)
-    print(f"Total parameters: {total_params}")
-    test_model_with_zeros()
-    test_position_encodings()
-    
+    test_position_encoder()
