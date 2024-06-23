@@ -41,7 +41,7 @@ def gradfilter_ma(
 
     for n, p in m.named_parameters():
         if p.requires_grad and p.grad is not None:
-            grads[n].append(p.grad.data.detach()) # .cpu())
+            grads[n].append(p.grad.data.detach())
 
             # Modify the gradients.
             if not warmup or len(grads[n]) == window_size and not trigger:
