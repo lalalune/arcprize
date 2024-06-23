@@ -48,7 +48,7 @@ def is_valid_size(matrix):
     return len(matrix) <= 16 and all(len(row) <= 16 for row in matrix)
 
 
-def generate_all_augmentations(example, num_augmentations=6):
+def generate_all_augmentations(example, num_augmentations=16):
     if not is_valid_size(example["input"]) or not is_valid_size(example["output"]):
         return []  # Skip this example if it's too large
 

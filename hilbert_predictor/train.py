@@ -18,10 +18,7 @@ from .model import (
     max_prediction_length,
     dropout_rate,
     device,
-<<<<<<< HEAD
-=======
     batch_size,
->>>>>>> d2926821867f8bf7466a5215197149cbac71623f
 )
 from .data import (
     NUM_TOKENS,
@@ -31,60 +28,8 @@ from .data import (
     training_data,
 )
 from torch.cuda.amp import autocast, GradScaler
-<<<<<<< HEAD
-import wandb
-
-batch_size = 1
-if torch.cuda.is_available():
-    batch_size = 32
-accumulation_steps = 16  # Accumulate gradients over 16 batches
-use_amp = True  # Use Automatic Mixed Precision
-
-# Prepare data loaders
-train_dataset = TensorDataset(
-    torch.tensor([x[0] for x in training_data], dtype=torch.long),
-    torch.tensor([x[1] for x in training_data], dtype=torch.long),
-)
-
-# Loss function and optimizer
-optimizer = optim.Adam(model.parameters(), lr=1e-4)
-scaler = GradScaler(enabled=use_amp)
-
-# Load checkpoint if it exists
-start_epoch = 0
-if checkpoint_path.exists():
-    print(f"Loading checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    start_epoch = checkpoint["epoch"] + 1
-    print(f"Resuming from epoch {start_epoch}")
-
-
-class WeightedCrossEntropyLoss(nn.Module):
-    def __init__(self, num_classes, ignore_index=-100, zero_weight=0.1):
-        super().__init__()
-        self.num_classes = num_classes
-        self.ignore_index = ignore_index
-        self.zero_weight = zero_weight
-
-    def forward(self, input, target):
-        input = input.view(-1, self.num_classes + 1).float()  # Ensure input is float
-        target = target.view(-1)
-
-        log_probs = F.log_softmax(input, dim=1)
-
-        non_ignored_mask = target != self.ignore_index
-        weights = torch.ones_like(target, dtype=torch.float)
-        weights[target == 0] = self.zero_weight
-        weights[target == self.ignore_index] = 0
-
-        loss = -log_probs.gather(1, target.unsqueeze(1)).squeeze(1) * weights
-        return loss.sum() / non_ignored_mask.sum()
-
-=======
 from torch.nn import CrossEntropyLoss
->>>>>>> d2926821867f8bf7466a5215197149cbac71623f
+
 
 def collate_fn(batch):
     src_list, tgt_list = zip(*batch)
@@ -120,11 +65,6 @@ def train_step(
     train_loader,
     teacher_forcing_ratio=1.0,
 ):
-<<<<<<< HEAD
-    batch_size, max_len = tgt.shape
-
-=======
->>>>>>> d2926821867f8bf7466a5215197149cbac71623f
     with autocast(enabled=use_amp):
         logits = model(src)  # Assuming model now outputs logits directly
 
@@ -176,26 +116,10 @@ if __name__ == "__main__":
         train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
     # Training loop
-    num_epochs = 50
+    num_epochs = 10000
 
-<<<<<<< HEAD
-    wandb.init(
-        project="hilbert_predictor",
-        config={
-            "num_epochs": num_epochs,
-            "batch_size": batch_size,
-            "accumulation_steps": accumulation_steps,
-            "d_model": d_model,
-            "nhead": nhead,
-            "num_layers": num_layers,
-            "dim_feedforward": dim_feedforward,
-            "dropout_rate": dropout_rate,
-        },
-    )
-=======
     if args.wandb:
         import wandb
-
         wandb.init(
             project="hilbert_predictor",
             config={
@@ -208,8 +132,15 @@ if __name__ == "__main__":
                 "dim_feedforward": dim_feedforward,
                 "dropout_rate": dropout_rate,
             },
+            resume="auto"
         )
->>>>>>> d2926821867f8bf7466a5215197149cbac71623f
+    if checkpoint_path.exists():
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        print(f"Resuming training from epoch {start_epoch}")
+
 
     for epoch in range(start_epoch, num_epochs):
         model.train()
@@ -234,18 +165,7 @@ if __name__ == "__main__":
 
             total_loss += loss.item()
 
-            print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
-
-            if batch_idx % 100 == 0:
-                torch.save(
-                    {
-                        "epoch": epoch,
-                        "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                        "loss": loss.item(),
-                    },
-                    checkpoint_path,
-                )
+            # print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
 
         if (batch_idx + 1) % accumulation_steps != 0:
             scaler.step(optimizer)
@@ -264,11 +184,6 @@ if __name__ == "__main__":
             },
             checkpoint_path,
         )
-<<<<<<< HEAD
-        # Log epoch metrics to Wandb
-        wandb.log({"epoch": epoch + 1, "avg_loss": avg_loss})
-=======
->>>>>>> d2926821867f8bf7466a5215197149cbac71623f
 
         if args.wandb:
             # Log epoch metrics to Wandb

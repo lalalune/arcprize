@@ -14,6 +14,12 @@ python -m hilbert_predictor.eval
 
 ```
 
+To train with wandb
+```
+wandb login
+python -m hilbert_predictor.train --wandb
+```
+
 ## NOTES:
 
 Tokens 0-9 are colors
