@@ -13,9 +13,8 @@ from .model import (
     nhead,
     num_layers,
     dim_feedforward,
-    max_seq_length,
-    max_context_length,
-    max_prediction_length,
+    MAX_CONTEXT_LENGTH,
+    MAX_PREDICTION_LENGTH,
     dropout_rate,
     device,
     batch_size,
@@ -34,23 +33,23 @@ from torch.nn import CrossEntropyLoss
 def collate_fn(batch):
     src_list, tgt_list = zip(*batch)
     src_padded = torch.nn.utils.rnn.pad_sequence(
-        [torch.tensor(src[:max_context_length], dtype=torch.long) for src in src_list],
+        [torch.tensor(src[:MAX_CONTEXT_LENGTH], dtype=torch.long) for src in src_list],
         batch_first=True,
         padding_value=PAD_TOKEN,
     )
     tgt_padded = torch.nn.utils.rnn.pad_sequence(
         [
-            torch.tensor(tgt[:max_prediction_length], dtype=torch.long)
+            torch.tensor(tgt[:MAX_PREDICTION_LENGTH], dtype=torch.long)
             for tgt in tgt_list
         ],
         batch_first=True,
         padding_value=PAD_TOKEN,
     )
     src_lengths = torch.LongTensor(
-        [min(len(src), max_context_length) for src in src_list]
+        [min(len(src), MAX_CONTEXT_LENGTH) for src in src_list]
     )
     tgt_lengths = torch.LongTensor(
-        [min(len(tgt), max_prediction_length) for tgt in tgt_list]
+        [min(len(tgt), MAX_PREDICTION_LENGTH) for tgt in tgt_list]
     )
     return src_padded, tgt_padded, src_lengths, tgt_lengths
 
@@ -66,7 +65,8 @@ def train_step(
     teacher_forcing_ratio=1.0,
 ):
     with autocast(enabled=use_amp):
-        logits = model(src)  # Assuming model now outputs logits directly
+        dimensions = src.size(0), src.size(1)  # Pass the dimensions of the input
+        logits = model(src, dimensions)  # Pass dimensions to the model
 
         logits = logits[
             :, : tgt.size(1), :
@@ -87,7 +87,8 @@ def train_step(
 if __name__ == "__main__":
     accumulation_steps = 16  # Accumulate gradients over 16 batches
     use_amp = True  # Use Automatic Mixed Precision
-
+    print("Training the model.")
+    print("training_data", training_data[0])
     # Prepare data loaders
     train_dataset = TensorDataset(
         torch.tensor([x[0] for x in training_data], dtype=torch.long),

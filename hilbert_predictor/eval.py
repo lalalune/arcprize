@@ -6,7 +6,6 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from .gilbert2d import unflatten_1d_to_2d, gilbert2d
 from .data import (
     PAD_TOKEN,
     START_SEQUENCE_TOKEN,
@@ -14,6 +13,8 @@ from .data import (
     START_EXAMPLE_TOKEN,
     END_EXAMPLE_TOKEN,
     evaluating_file_paths,
+    unflatten_1d_to_2d,
+    gilbert2d
 )
 from .model import model, checkpoint_path, device
 
@@ -24,7 +25,7 @@ def eval(checkpoint_path, device, filenames):
 
     # Load the test data
     # wandb.init(project="hilbert_predictor", job_type="eval")
-    test_data = np.load("processed_evaluating_data.npy", allow_pickle=True)
+    test_data = np.load("processed_evaluating_data.pkl", allow_pickle=True)
     test_inputs = [item[0] for item in test_data]
     test_targets = [item[1] for item in test_data]
 
@@ -65,8 +66,10 @@ def eval(checkpoint_path, device, filenames):
             for (src, tgt), filename in zip(test_loader, filenames):
                 src, tgt = src.to(device), tgt.to(device)
 
+                # Get the dims for Hilbert-aware position encoding
+                dimensions = src.size(1), src.size(2)  # Pass the dimensions of the input
                 # Generate output sequence
-                output = model(src)
+                output = model(src, dimensions)
                 _, predicted = torch.max(output.data, -1)
 
                 # Find the end of the actual sequence (ignoring padding)

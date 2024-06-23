@@ -5,8 +5,9 @@ import os
 import json
 import numpy as np
 import torch
+import random
 
-from .encoder import PositionEncoder
+from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
 
 # Token definitions
 PAD_TOKEN = 10
@@ -18,10 +19,12 @@ START_OUTPUT_MATRIX_TOKEN = 15
 END_OUTPUT_MATRIX_TOKEN = 16
 START_SEQUENCE_TOKEN = 17
 END_SEQUENCE_TOKEN = 18
+MASK = 19
 NUM_TOKENS = END_SEQUENCE_TOKEN + 1
 
-MAX_CONTEXT_LENGTH = 64
-MAX_PREDICTION_LENGTH = 8
+MAX_CONTEXT_LENGTH = 1024
+MAX_SEQUENCE_LENGTH = 1024 + 128
+MAX_PREDICTION_LENGTH = 128
 
 evaluating_data = None
 
@@ -98,23 +101,24 @@ def generate2d(x, y, ax, ay, bx, by):
         )
 
 
-def flatten_2d_to_1d(array_2d):
-    print("array_2d")
-    print(array_2d)
-    height, width = len(array_2d), len(array_2d[0])
-    print("height, width", height, width)
-    if height == 1:
-        # Row vector: return as-is
-        return array_2d[0]
-    elif width == 1:
-        # Column vector: reshape to row vector
-        return [row[0] for row in array_2d]
+def flatten_2d_to_1d(array):
+    array = np.array(array)
+    if array.ndim == 1:
+        return array.tolist()
+    elif array.ndim == 2:
+        height, width = array.shape
+        if height == 1:
+            return array[0].tolist()
+        elif width == 1:
+            return array.T[0].tolist()
+        else:
+            # 2D matrix: flatten using Hilbert curve
+            array_1d = [None] * (width * height)
+            for idx, (x, y) in enumerate(gilbert2d(width, height)):
+                array_1d[idx] = array[y][x]
+            return array_1d
     else:
-        # 2D matrix: flatten using Hilbert curve
-        array_1d = [None] * (width * height)
-        for idx, (x, y) in enumerate(gilbert2d(width, height)):
-            array_1d[idx] = array_2d[y][x]
-        return array_1d
+        raise ValueError(f"Input array must be 1D or 2D, got {array.ndim}D")
 
 def create_mapping_table():
     mapping_table = {}
@@ -142,93 +146,89 @@ def load_mapping_table(filename='mapping_table.pkl'):
 
 def unflatten_1d_to_2d(array_1d, width, height):
     array_2d = [[None] * width for _ in range(height)]
-
     for idx, (x, y) in enumerate(gilbert2d(width, height)):
         array_2d[y][x] = array_1d[idx]
 
     return array_2d
 
 def pad_sequence(sequence, max_length, pad_value, left_pad=False):
+    actual_length = len(sequence)
+    padding_length = max(0, max_length - actual_length)
     if left_pad:
-        padding_length = max(0, max_length - len(sequence))
         return np.pad(sequence, (padding_length, 0), mode='constant', constant_values=pad_value)
     else:
-        padding_length = max(0, max_length - len(sequence))
         return np.pad(sequence, (0, padding_length), mode='constant', constant_values=pad_value)
 
 def process_data(data_list):
-    print("data list", data_list)
     processed_data = []
     for data in data_list:
-        print("data", data)
         train_examples = data["train"]
         test_examples = data["test"]
-        print("test_examples", test_examples)
-        
+
+        # Randomize train examples to prevent sequence memorization
+        random.shuffle(train_examples)
+
         for test_example in test_examples:
-            # Create a sequence for each test example
             context = [START_SEQUENCE_TOKEN]
-
-            # Add all training examples to the context
-            for train_example in train_examples:
-                train_input = flatten_2d_to_1d(np.array(train_example['input']))
-                train_output = flatten_2d_to_1d(np.array(train_example['output']))
-                train_dimensions = [len(train_example['input']), len(train_example['input'][0])]
-                
-                context.extend([
-                    START_EXAMPLE_TOKEN,
-                    START_INPUT_MATRIX_TOKEN,
-                    *train_input,
-                    END_INPUT_MATRIX_TOKEN,
-                    START_OUTPUT_MATRIX_TOKEN,
-                    *train_output,
-                    END_OUTPUT_MATRIX_TOKEN,
-                    END_EXAMPLE_TOKEN
-                ])
-
-            print('test_example', test_example)
+            # Use all other examples as part of the input context
+            for ex in train_examples + test_examples:
+                if ex != test_example:  # Exclude the current test case from context
+                    input_flat = flatten_2d_to_1d(np.array(ex['input']))
+                    output_flat = flatten_2d_to_1d(np.array(ex['output']))
+                    context.extend([START_EXAMPLE_TOKEN, START_INPUT_MATRIX_TOKEN] + input_flat +
+                                   [END_INPUT_MATRIX_TOKEN, START_OUTPUT_MATRIX_TOKEN] + output_flat +
+                                   [END_OUTPUT_MATRIX_TOKEN, END_EXAMPLE_TOKEN])
             
-            # Add the test input
-            test_input = flatten_2d_to_1d(np.array(test_example['input']))
-            test_output = flatten_2d_to_1d(np.array(test_example['output']))
-            test_dimensions = [len(test_example['input']), len(test_example['input'][0])]
+            # Now process the actual test case
+            test_input = np.array(test_example['input'])
+            test_input_flat = flatten_2d_to_1d(test_input)
+            test_output_flat = flatten_2d_to_1d(np.array(test_example['output']))
+
+            context.extend([START_EXAMPLE_TOKEN, START_INPUT_MATRIX_TOKEN] + test_input_flat + [END_INPUT_MATRIX_TOKEN])
+            context = pad_sequence(context, MAX_CONTEXT_LENGTH, PAD_TOKEN, left_pad=True)
+            target = pad_sequence([START_OUTPUT_MATRIX_TOKEN] + test_output_flat + [END_OUTPUT_MATRIX_TOKEN, END_SEQUENCE_TOKEN], MAX_PREDICTION_LENGTH, PAD_TOKEN)
             
-            context.extend([
-                START_EXAMPLE_TOKEN,
-                START_INPUT_MATRIX_TOKEN,
-                *test_input,
-                END_INPUT_MATRIX_TOKEN,
-                START_OUTPUT_MATRIX_TOKEN
-            ])
-            
-            # Left-pad or truncate the context (excluding the test input)
-            context = pad_sequence(context, MAX_CONTEXT_LENGTH - 5, PAD_TOKEN, left_pad=True)
+            dimensions = test_input.shape  # Store the dimensions of the input matrix
+            print(f"Context: {context}")
+            print(f"Target: {target}")
+            print(f"Dimensions: {dimensions}")  # This should now correctly print dimensions without error
 
-            # Create target sequence
-            target = [START_OUTPUT_MATRIX_TOKEN] + test_output + [END_OUTPUT_MATRIX_TOKEN, END_EXAMPLE_TOKEN, END_SEQUENCE_TOKEN]
+            # Append the tuple with dimensions
+            processed_data.append((np.array(context), np.array(target), dimensions))
 
-            # Right-pad or truncate the target
-            target = pad_sequence(target, MAX_PREDICTION_LENGTH, PAD_TOKEN, left_pad=False)
-
-            processed_data.append((np.array(context), np.array(target), test_dimensions))
-    
     return processed_data
+
+
+def is_within_bounds(data, max_dim=10):
+    """
+    Check if any matrix in the train or test datasets exceeds the maximum dimensions.
+    """
+    for example in data['train'] + data['test']:
+        if any(dim > max_dim for dim in np.array(example['input']).shape):
+            return False
+        if any(dim > max_dim for dim in np.array(example['output']).shape):
+            return False
+    return True
 
 def load_and_process_training_data(file_paths):
     processed_data = []
     for file_path in file_paths:
-        print("Loading file: ", file_path)
+        print("Loading file:", file_path)
         with open(file_path, "r") as f:
             data = json.load(f)
-            processed_data.extend(process_data([data]))
+            if is_within_bounds(data):
+                processed_data.extend(process_data([data]))
+            else:
+                print("Skipped due to exceeding dimension limits:", file_path)
     
     print(f"Total processed data points: {len(processed_data)}")
     return processed_data
 
 
+
 # Rest of the code remains the same
-training_data_dir = "./bitdata/training"
-evaluating_data_dir = "./bitdata/evaluation"
+training_data_dir = "./data/training"
+evaluating_data_dir = "./data/evaluation"
 
 training_file_paths = [
     os.path.join(training_data_dir, f)
@@ -245,40 +245,40 @@ evaluating_file_paths = [
 processed_training_file = "processed_training_data.pkl"
 processed_evaluating_file = "processed_evaluating_data.pkl"
 
-# if os.path.exists(processed_training_file) and os.path.exists(
-#     processed_evaluating_file
-# ):
-#     print("Loading pre-processed data...")
-#     with open(processed_training_file, 'rb') as f:
-#         training_data = pickle.load(f)
-#     with open(processed_evaluating_file, 'rb') as f:
-#         evaluating_data = pickle.load(f)
-#     print(f"Loaded {len(training_data)} training data points")
-#     print(f"Loaded {len(evaluating_data)} evaluation data points")
-# else:
-#     print("Processing data...")
-#     training_data = load_and_process_training_data(
-#         training_file_paths
-#     )
-#     evaluating_data = load_and_process_training_data(
-#         evaluating_file_paths
-#     )
+if os.path.exists(processed_training_file) and os.path.exists(
+    processed_evaluating_file
+):
+    print("Loading pre-processed data...")
+    with open(processed_training_file, 'rb') as f:
+        training_data = pickle.load(f)
+    with open(processed_evaluating_file, 'rb') as f:
+        evaluating_data = pickle.load(f)
+    print(f"Loaded {len(training_data)} training data points")
+    print(f"Loaded {len(evaluating_data)} evaluation data points")
+else:
+    print("Processing data...")
+    training_data = load_and_process_training_data(
+        training_file_paths
+    )
+    evaluating_data = load_and_process_training_data(
+        evaluating_file_paths
+    )
 
-#     # Save processed data
-#     with open(processed_training_file, 'wb') as f:
-#         pickle.dump(training_data, f)
-#     with open(processed_evaluating_file, 'wb') as f:
-#         pickle.dump(evaluating_data, f)
-#     print("Processed data saved.")
+    # Save processed data
+    with open(processed_training_file, 'wb') as f:
+        pickle.dump(training_data, f)
+    with open(processed_evaluating_file, 'wb') as f:
+        pickle.dump(evaluating_data, f)
+    print("Processed data saved.")
 
-# print("Data loading completed.")
+print("Data loading completed.")
 
 # Print a few lines to verify the data
-# print("Training data examples:")
-# for i in range(min(3, len(training_data))):
-#     print(f"Input (length {len(training_data[i][0])}): {training_data[i][0]}")
-#     print(f"Output (length {len(training_data[i][1])}): {training_data[i][1]}")
-#     print("---")
+print("Training data examples:")
+for i in range(min(3, len(training_data))):
+    print(f"Input (length {len(training_data[i][0])}): {training_data[i][0]}")
+    print(f"Output (length {len(training_data[i][1])}): {training_data[i][1]}")
+    print("---")
 
 def test_mapping():
     mapping_table = load_mapping_table()
@@ -286,7 +286,7 @@ def test_mapping():
         for width in range(1, 31):
             mapping, encodings = mapping_table[(height, width)]
             assert len(mapping) == height * width, f"Incorrect mapping length for {height}x{width}"
-            assert encodings.shape == (height, width, 68), f"Incorrect encoding shape for {height}x{width}: {encodings.shape}"
+            assert encodings.shape == (height, width, NUM_ENCODING_DIMENSIONS), f"Incorrect encoding shape for {height}x{width}: {encodings.shape}"
             assert torch.all(encodings[:, :, 0] >= -1) and torch.all(encodings[:, :, 0] <= 1), "X values out of range"
             assert torch.all(encodings[:, :, 1] >= -1) and torch.all(encodings[:, :, 1] <= 1), "Y values out of range"
 
@@ -322,7 +322,55 @@ def test_mapping():
     test_case([[1, 2, 3], [4, 5, 6], [7, 8, 9]])  # 3x3
     test_case([[i for i in range(j*5+1, (j+1)*5+1)] for j in range(5)])  # 5x5
 
+def analyze_dataset(data):
+    """
+    Analyze the dataset to find:
+    1. Maximum number of unique tokens.
+    2. Maximum example width and height.
+    3. Maximum sequence length.
+    """
+    max_tokens = 0
+    max_width = 0
+    max_height = 0
+    max_sequence_length = 0
+    token_set = set()
+
+    print('data', data[0])
+
+    for context, target, dimensions in data:
+        # Update maximum sequence lengths
+        # strip 10s from convert (padding tokens)
+        stripped_context = [x for x in context if x != 10]
+        # strip the target
+        stripped_target = [x for x in target if x != 10]
+        max_sequence_length = max(max_sequence_length, len(stripped_context), len(stripped_target))
+        
+        # Flatten the list to find unique tokens
+        tokens = set(context).union(set(target))
+        token_set.update(tokens)
+
+        # Check all matrices
+        for item in [context, target]:  # Assuming context and target include raw matrices
+            array_2d = unflatten_1d_to_2d(item, width=dimensions[0], height=dimensions[1])  # Adjust width and height if known differently
+            height, width = np.array(array_2d).shape
+            max_height = max(max_height, height)
+            max_width = max(max_width, width)
+
+    max_tokens = len(token_set)
+    print("Maximum number of unique tokens:", max_tokens)
+    print("Maximum width and height:", max_width, max_height)
+    print("Maximum sequence length:", max_sequence_length)
+
+# Usage
 if __name__ == "__main__":
+    training_file_paths = [
+        os.path.join(training_data_dir, f)
+        for f in os.listdir(training_data_dir)
+        if f.endswith(".json")
+    ]
+    training_data = load_and_process_training_data(training_file_paths)
+    analyze_dataset(training_data)
+
     mapping_table_file = 'mapping_table.pkl'
     
     if os.path.exists(mapping_table_file):
