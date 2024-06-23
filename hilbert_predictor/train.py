@@ -5,12 +5,10 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import random
+import argparse
 from .model import (
     model,
-    device,
     checkpoint_path,
-    max_context_length,
-    max_prediction_length,
     d_model,
     nhead,
     num_layers,
@@ -20,6 +18,10 @@ from .model import (
     max_prediction_length,
     dropout_rate,
     device,
+<<<<<<< HEAD
+=======
+    batch_size,
+>>>>>>> d2926821867f8bf7466a5215197149cbac71623f
 )
 from .data import (
     NUM_TOKENS,
@@ -29,6 +31,7 @@ from .data import (
     training_data,
 )
 from torch.cuda.amp import autocast, GradScaler
+<<<<<<< HEAD
 import wandb
 
 batch_size = 1
@@ -79,6 +82,9 @@ class WeightedCrossEntropyLoss(nn.Module):
         loss = -log_probs.gather(1, target.unsqueeze(1)).squeeze(1) * weights
         return loss.sum() / non_ignored_mask.sum()
 
+=======
+from torch.nn import CrossEntropyLoss
+>>>>>>> d2926821867f8bf7466a5215197149cbac71623f
 
 def collate_fn(batch):
     src_list, tgt_list = zip(*batch)
@@ -114,8 +120,11 @@ def train_step(
     train_loader,
     teacher_forcing_ratio=1.0,
 ):
+<<<<<<< HEAD
     batch_size, max_len = tgt.shape
 
+=======
+>>>>>>> d2926821867f8bf7466a5215197149cbac71623f
     with autocast(enabled=use_amp):
         logits = model(src)  # Assuming model now outputs logits directly
 
@@ -136,16 +145,40 @@ def train_step(
 
 
 if __name__ == "__main__":
-    criterion = WeightedCrossEntropyLoss(
-        num_classes=NUM_TOKENS, ignore_index=PAD_TOKEN, zero_weight=0.1
+    accumulation_steps = 16  # Accumulate gradients over 16 batches
+    use_amp = True  # Use Automatic Mixed Precision
+
+    # Prepare data loaders
+    train_dataset = TensorDataset(
+        torch.tensor([x[0] for x in training_data], dtype=torch.long),
+        torch.tensor([x[1] for x in training_data], dtype=torch.long),
     )
 
+    # Loss function and optimizer
+    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    scaler = GradScaler(enabled=use_amp)
+
+    # Load checkpoint if it exists
+    start_epoch = 0
+    parser = argparse.ArgumentParser(description="Train the model")
+    parser.add_argument(
+        "--wandb", action="store_true", help="Enable Weights & Biases logging"
+    )
+    args = parser.parse_args()
+
+    criterion = CrossEntropyLoss(ignore_index=PAD_TOKEN)
+    # Prepare data loaders
+    train_dataset = TensorDataset(
+        torch.tensor([x[0] for x in training_data], dtype=torch.long),
+        torch.tensor([x[1] for x in training_data], dtype=torch.long),
+    )
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
     # Training loop
     num_epochs = 50
 
+<<<<<<< HEAD
     wandb.init(
         project="hilbert_predictor",
         config={
@@ -159,6 +192,24 @@ if __name__ == "__main__":
             "dropout_rate": dropout_rate,
         },
     )
+=======
+    if args.wandb:
+        import wandb
+
+        wandb.init(
+            project="hilbert_predictor",
+            config={
+                "num_epochs": num_epochs,
+                "batch_size": batch_size,
+                "accumulation_steps": accumulation_steps,
+                "d_model": d_model,
+                "nhead": nhead,
+                "num_layers": num_layers,
+                "dim_feedforward": dim_feedforward,
+                "dropout_rate": dropout_rate,
+            },
+        )
+>>>>>>> d2926821867f8bf7466a5215197149cbac71623f
 
     for epoch in range(start_epoch, num_epochs):
         model.train()
@@ -213,10 +264,17 @@ if __name__ == "__main__":
             },
             checkpoint_path,
         )
+<<<<<<< HEAD
         # Log epoch metrics to Wandb
         wandb.log({"epoch": epoch + 1, "avg_loss": avg_loss})
+=======
+>>>>>>> d2926821867f8bf7466a5215197149cbac71623f
 
-        # Save model checkpoint to Wandb
-        wandb.save(str(checkpoint_path))
+        if args.wandb:
+            # Log epoch metrics to Wandb
+            wandb.log({"epoch": epoch + 1, "avg_loss": avg_loss})
+
+            # Save model checkpoint to Wandb
+            wandb.save(str(checkpoint_path))
 
     print("Training completed.")
