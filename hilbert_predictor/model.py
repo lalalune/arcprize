@@ -9,20 +9,50 @@ from xformers.components.positional_embedding import RotaryEmbedding
 from torch.utils.checkpoint import checkpoint
 
 
-# Model initialization
+# Model initialization tiny
 batch_size = 1
 if torch.cuda.is_available():
-    batch_size = 48
-d_model = 1024
-nhead = 4
-num_layers = 6
-dim_feedforward = 2048
-max_seq_length = 4096
-max_context_length = 3072
-max_prediction_length = 1024
+    batch_size = 256
+d_model = 16
+nhead = 8
+num_layers = 3
+dim_feedforward = 128
+max_seq_length = 384
+max_context_length = 256
+max_prediction_length = 128
 dropout_rate = 0.05
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 checkpoint_path = Path("checkpoint.pt")
+
+# Model initialization small
+batch_size = 1
+if torch.cuda.is_available():
+    batch_size = 32
+d_model = 32
+nhead = 4
+num_layers = 4
+dim_feedforward = 256
+max_seq_length = 384
+max_context_length = 256
+max_prediction_length = 128
+dropout_rate = 0.05
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+checkpoint_path = Path("checkpoint_sm.pt")
+
+# Model initialization large
+# batch_size = 1
+# if torch.cuda.is_available():
+#     batch_size = 48
+# d_model = 1024
+# nhead = 4
+# num_layers = 6
+# dim_feedforward = 2048
+# max_seq_length = 4096
+# max_context_length = 3072
+# max_prediction_length = 1024
+# dropout_rate = 0.05
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# checkpoint_path = Path("checkpoint_lg.pt")
 
 
 class DecoderOnlyTransformer(nn.Module):

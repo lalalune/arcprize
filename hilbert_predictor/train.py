@@ -116,7 +116,7 @@ if __name__ == "__main__":
         train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
     # Training loop
-    num_epochs = 50
+    num_epochs = 10000
 
     if args.wandb:
         import wandb
@@ -165,7 +165,7 @@ if __name__ == "__main__":
 
             total_loss += loss.item()
 
-            print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
+            # print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
 
         if (batch_idx + 1) % accumulation_steps != 0:
             scaler.step(optimizer)
