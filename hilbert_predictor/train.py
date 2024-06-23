@@ -218,7 +218,8 @@ if __name__ == "__main__":
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
-                "loss": avg_loss,
+                "loss": loss.item(),
+                "grads": grads,  # Add this line
             },
             checkpoint_path,
         )
