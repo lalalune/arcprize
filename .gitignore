@@ -5,3 +5,4 @@ keys.txt
 predictions.txt
 prediction_plots
 *data.txt
+.DS_Store
