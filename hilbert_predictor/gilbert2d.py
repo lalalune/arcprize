@@ -1,9 +1,9 @@
-# binary rule predictor data loader
 import os
 import pickle
 import numpy as np
 import torch
 from .encoder import NUM_ENCODING_DIMENSIONS, PositionEncoder
+from .args import hilbert, quadtree
 
 # Gilbert2D - Generalized Hilbert Curve for 2D space-filling
 def gilbert2d(width, height):
@@ -89,13 +89,27 @@ def flatten_2d_to_1d(array):
         elif width == 1:
             return array.T[0].tolist()
         else:
-            # 2D matrix: flatten using Hilbert curve
-            array_1d = [None] * (width * height)
-            for idx, (x, y) in enumerate(gilbert2d(width, height)):
-                array_1d[idx] = array[y][x]
+            # 2D matrix: flatten using Hilbert curve or raw concatenation
+            if hilbert:
+                array_1d = [None] * (width * height)
+                for idx, (x, y) in enumerate(gilbert2d(width, height)):
+                    array_1d[idx] = array[y][x]
+            else:
+                array_1d = array.flatten().tolist()
             return array_1d
     else:
         raise ValueError(f"Input array must be 1D or 2D, got {array.ndim}D")
+
+def unflatten_1d_to_2d(array_1d, width, height):
+    array_2d = [[None] * width for _ in range(height)]
+    if hilbert:
+        for idx, (x, y) in enumerate(gilbert2d(width, height)):
+            array_2d[y][x] = array_1d[idx]
+    else:
+        for i in range(height):
+            for j in range(width):
+                array_2d[i][j] = array_1d[i * width + j]
+    return array_2d
 
 def create_mapping_table():
     mapping_table = {}
@@ -118,13 +132,6 @@ def save_mapping_table(mapping_table, filename='mapping_table.pkl'):
 def load_mapping_table(filename='mapping_table.pkl'):
     with open(filename, 'rb') as f:
         return pickle.load(f)
-
-def unflatten_1d_to_2d(array_1d, width, height):
-    array_2d = [[None] * width for _ in range(height)]
-    for idx, (x, y) in enumerate(gilbert2d(width, height)):
-        array_2d[y][x] = array_1d[idx]
-
-    return array_2d
 
 def test_mapping():
     mapping_table = load_mapping_table()
@@ -153,15 +160,16 @@ def test_mapping():
         elif width == 1:
             reconstructed = [[value] for value in flattened]
         else:
-            reconstructed = [[0] * width for _ in range(height)]
-            for idx, value in enumerate(flattened):
-                x, y = mapping_table[(height, width)][0][idx]  # Get the x, y coordinates from the tuple
-                reconstructed[y][x] = value
+            if hilbert:
+                reconstructed = [[0] * width for _ in range(height)]
+                for idx, value in enumerate(flattened):
+                    x, y = mapping_table[(height, width)][0][idx]  # Get the x, y coordinates from the tuple
+                    reconstructed[y][x] = value
+            else:
+                reconstructed = unflatten_1d_to_2d(flattened, width, height)
 
         assert matrix == reconstructed, f"Test failed for matrix: {matrix}"
         print(f"Test passed for {height}x{width} matrix")
-
-
 
     # Test cases
     test_case([[1]])  # 1x1
@@ -171,7 +179,9 @@ def test_mapping():
     test_case([[1, 2, 3], [4, 5, 6], [7, 8, 9]])  # 3x3
     test_case([[i for i in range(j*5+1, (j+1)*5+1)] for j in range(5)])  # 5x5
 
-mapping_table_file = 'mapping_table.pkl'
+mapping_table_file = 'hilbert_mapping_quadtree.pkl'
+if quadtree is False:
+    mapping_table_file = 'mapping_table.pkl'
     
 if os.path.exists(mapping_table_file):
     print("Loading existing mapping table...")

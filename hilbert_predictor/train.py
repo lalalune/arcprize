@@ -13,7 +13,7 @@ from .model import (
     device,
     batch_size,
 )
-from .args import checkpoint_path, dropout_rate, batch_size
+from .args import checkpoint_path, dropout_rate, batch_size, use_schedulefree
 
 from .data import (
     NUM_TOKENS,
@@ -100,6 +100,8 @@ def train_step(model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion,
 
         if t < seq_len - 1:
             use_teacher_forcing = torch.rand(1).item() < teacher_forcing_ratio
+            if use_teacher_forcing is False:
+                print("Teacher forcing is off.")
             input_token = tgt[:, t+1].unsqueeze(1) if use_teacher_forcing else logits.argmax(-1).unsqueeze(1)
 
     # Calculate loss excluding the last token of the target (which should be END_SEQUENCE_TOKEN)
@@ -164,7 +166,8 @@ if __name__ == "__main__":
     model.train()
     
     # Needed for schedule-free optimizer
-    model.optimizer.train()
+    if use_schedulefree:
+        model.optimizer.train()
     
     if args.wandb:
         import wandb
@@ -201,8 +204,8 @@ if __name__ == "__main__":
             # grads = gradfilter_ma(model, grads=grads)
             
             # Apply gradient clipping
-            max_grad_norm = 1.0  # Adjust this value as needed
-            clip_grad_norm(model.parameters(), max_grad_norm)
+            # max_grad_norm = 1.0  # Adjust this value as needed
+            # clip_grad_norm(model.parameters(), max_grad_norm)
 
             model.optimizer.step()
             model.optimizer.zero_grad()

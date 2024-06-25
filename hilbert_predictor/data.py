@@ -78,9 +78,18 @@ def process_data(data_list):
             test_input_flat = flatten_2d_to_1d(test_input)
             test_output_flat = flatten_2d_to_1d(np.atleast_2d(test_example['output']))
 
-            context.extend([START_EXAMPLE_TOKEN, START_INPUT_MATRIX_TOKEN] + test_input_flat + [END_INPUT_MATRIX_TOKEN])
+            context.extend([START_EXAMPLE_TOKEN, START_INPUT_MATRIX_TOKEN] + test_input_flat + [END_INPUT_MATRIX_TOKEN] + [START_OUTPUT_MATRIX_TOKEN])
+            
+            target = test_output_flat + [END_OUTPUT_MATRIX_TOKEN, END_SEQUENCE_TOKEN, END_EXAMPLE_TOKEN]
+            
+            print("context", context)
+            print("target", target)
+            # print the first and last token of each
+            print("context first/last", context[0], context[-1])
+            print("target first/last", target[0], target[-1])
+            
             context = pad_sequence(context, MAX_CONTEXT_LENGTH, PAD_TOKEN, left_pad=True)
-            target = pad_sequence([START_OUTPUT_MATRIX_TOKEN] + test_output_flat + [END_OUTPUT_MATRIX_TOKEN, END_SEQUENCE_TOKEN], MAX_PREDICTION_LENGTH, PAD_TOKEN)
+            target = pad_sequence(target, MAX_PREDICTION_LENGTH, PAD_TOKEN)
 
             dimensions = test_input.shape  # Already 2D due to atleast_2d
             print(f"Processed data: Dimensions: {dimensions}")
@@ -215,6 +224,12 @@ def analyze_dataset(data):
 
         # Check all matrices
         for item in [context, target]:  # Assuming context and target include raw matrices
+            print("width and height are", dimensions[0], dimensions[1])
+            # strip pad tokens
+            # extract the matrix by removing all other special tokens
+            item = [x for x in item if x not in [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]]
+            print("item is")
+            print(item)
             array_2d = unflatten_1d_to_2d(item, width=dimensions[0], height=dimensions[1])  # Adjust width and height if known differently
             height, width = np.array(array_2d).shape
             max_height = max(max_height, height)
@@ -233,7 +248,6 @@ if __name__ == "__main__":
         if f.endswith(".json")
     ]
     training_data = load_and_process_training_data(training_file_paths)
-    analyze_dataset(training_data)
     
     test_data_1x1 = {
         "train": [{"input": [[1]], "output": [[0]]}],
@@ -258,3 +272,5 @@ if __name__ == "__main__":
     print(f"Input: {processed_2x2[0][0]}")
     print(f"Output: {processed_2x2[0][1]}")
     print(f"Dimensions: {processed_2x2[0][2]}")
+    analyze_dataset(training_data)
+

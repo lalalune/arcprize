@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from .args import checkpoint_path
+from .args import checkpoint_path, use_schedulefree
 
 from .data import (
     MAX_CONTEXT_LENGTH,
@@ -40,9 +40,9 @@ def eval(checkpoint_path, device):
         checkpoint = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
-    
-    # needed for schedule free optimization
-    model.optimizer.eval()
+    if use_schedulefree:
+        # needed for schedule free optimization
+        model.optimizer.eval()
 
     os.makedirs("prediction_plots", exist_ok=True)
 
@@ -166,16 +166,5 @@ def eval(checkpoint_path, device):
     #     "overall_non_zero_accuracy": overall_non_zero_accuracy,
     #     "completely_correct_percentage": completely_correct_percentage,
     # })
-
-
-# Update the unflatten_1d_to_2d function in gilbert2d.py:
-def unflatten_1d_to_2d(array_1d, width, height):
-    array_2d = np.full((height, width), PAD_TOKEN)  # Fill with padding value
-    for idx, (x, y) in enumerate(gilbert2d(width, height)):
-        if idx < len(array_1d):
-            array_2d[y][x] = array_1d[idx]
-        else:
-            break
-    return array_2d
 
 eval(checkpoint_path, device)

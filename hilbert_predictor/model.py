@@ -6,7 +6,7 @@ from torch.utils.checkpoint import checkpoint
 
 from .data import MAX_CONTEXT_LENGTH, NUM_TOKENS, PAD_TOKEN, MAX_SEQUENCE_LENGTH
 from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
-from .args import dropout_rate, batch_size
+from .args import dropout_rate, batch_size, use_schedulefree
 
 from schedulefree import AdamWScheduleFree
 
@@ -43,8 +43,11 @@ class DecoderOnlyTransformer(nn.Module):
                 for _ in range(num_layers)
             ]
         )
-        self.optimizer = AdamWScheduleFree(self.parameters(), lr=0.01)
-        # self.optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
+        
+        if use_schedulefree:
+            self.optimizer = AdamWScheduleFree(self.parameters(), lr=0.001)
+        else:
+            self.optimizer = torch.optim.Adam(self.parameters(), lr=0.0001)
 
         self.fc_out = nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, num_tokens + 1)
         self.to(device)
