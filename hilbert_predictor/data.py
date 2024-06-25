@@ -247,7 +247,6 @@ else:
     training_data_dir = "./data/training"
     evaluating_data_dir = "./data/evaluation"
 
-# if 
 training_file_paths = [
     os.path.join(training_data_dir, f)
     for f in os.listdir(training_data_dir)

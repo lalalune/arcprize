@@ -1,7 +1,9 @@
 # ARC AGI 2024 Challenge
-This submission is for the ARC AGI challenge. The model is a transformer model with 6 layers, 8 heads, and 512 hidden units.
+This submission is for the ARC AGI challenge.
 
-The "secret sauce" here is using a Generalized Hilbert Curve function (Gilbert) to convert the 2D grid into a 1D sequence. This allows the model to learn the spatial relationships between the cells in the grid, even over distances.
+The "hilbert_predictor" incorporates several novel features and is under ongoing research.
+
+If you're interested in collaborating or are working on ARC AGI and just want people to hang out with while you do it, we have a Discord here: https://discord.gg/SQy6vA5eE4
 
 To train
 ```

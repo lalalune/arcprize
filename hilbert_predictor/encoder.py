@@ -64,6 +64,7 @@ class PositionEncoder(nn.Module):
 
         return encodings
 
+
     def forward(self, x, dimensions):
         if x.dim() != 3:
             raise ValueError(f"Expected input to be 3D, but got {x.dim()}D")

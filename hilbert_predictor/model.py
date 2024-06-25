@@ -229,4 +229,3 @@ if __name__ == "__main__":
     print(f"Total parameters: {total_params}")
     test_model_with_zeros()
     test_position_encodings()
-    
