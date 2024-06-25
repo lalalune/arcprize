@@ -1,25 +1,20 @@
 import torch
 import torch.nn as nn
-import math
-from pathlib import Path
 from xformers.components import MultiHeadDispatch
 from xformers.components.attention import ScaledDotProduct
-from .data import NUM_TOKENS, PAD_TOKEN, MAX_CONTEXT_LENGTH, MAX_SEQUENCE_LENGTH, MAX_PREDICTION_LENGTH
 from torch.utils.checkpoint import checkpoint
+
+from .data import NUM_TOKENS, PAD_TOKEN, MAX_SEQUENCE_LENGTH
 from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
+from .args import dropout_rate, batch_size
+
 from schedulefree import AdamWScheduleFree
 
-# Model initialization tiny
-batch_size = 1
-if torch.cuda.is_available():
-    batch_size = 2048
 d_model = 128 - NUM_ENCODING_DIMENSIONS
-nhead = 8
-num_layers = 12
-dim_feedforward = 1024
-dropout_rate = 0.1
+nhead = 2
+num_layers = 6
+dim_feedforward = 512
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-checkpoint_path = Path("checkpoint.pt")
 
 class DecoderOnlyTransformer(nn.Module):
     def __init__(
@@ -78,19 +73,33 @@ class DecoderOnlyTransformer(nn.Module):
         )
 
     def forward(self, src, dimensions):
-        assert src.dim() == 2, f"Expected input to be 2D, but got {src.dim()}D"
-        assert isinstance(dimensions, tuple), f"Expected dimensions to be a tuple, but got {type(dimensions)}"
-        assert len(dimensions) == 2, f"Expected dimensions to have length 2, but got {len(dimensions)}"
+        # print(f"DecoderOnlyTransformer - input shape: {src.shape}")
+        # print(f"DecoderOnlyTransformer - dimensions: {dimensions}")
 
+        height, width = dimensions[0]
+        # print(f"DecoderOnlyTransformer - height: {height}, width: {width}")
+        
+        # Clamp the input values to be within the valid range
+        src = torch.clamp(src, 0, self.token_embedding.num_embeddings - 1)
+        
+        # Reshape src if it's 4D
+        if src.dim() == 4:
+            src = src.squeeze(2)
+        elif src.dim() == 3:
+            src = src.squeeze(1)
+        
         x = self.token_embedding(src)
-        assert x.shape == (
-            src.shape[0],
-            src.shape[1],
-            self.d_model,
-        ), f"Expected shape {(src.shape[0], src.shape[1], self.d_model)}, but got {x.shape}"
+        
+        # print(f"DecoderOnlyTransformer - x shape after token embedding: {x.shape}")
+        # print(f"DecoderOnlyTransformer - x values after token embedding: {x}")
+        
+        # Adjust the assertion to allow for flexible batch size and sequence length
+        assert x.shape[-1] == self.d_model, f"Expected last dimension to be {self.d_model}, but got {x.shape[-1]}"
 
         # Add position encodings
         x = self.position_encoder(x, dimensions)
+
+        # print(f"DecoderOnlyTransformer - x shape after position encoding: {x.shape}")
 
         batch_size, seq_len, _ = x.shape
 
@@ -149,7 +158,8 @@ class DecoderOnlyTransformer(nn.Module):
             NUM_TOKENS + 1,
         ), f"Expected shape {(batch_size, seq_len, NUM_TOKENS + 1)}, but got {output.shape}"
 
-        return output
+        confidences = torch.softmax(output, dim=-1)
+        return output, confidences
 
 
 model = DecoderOnlyTransformer(

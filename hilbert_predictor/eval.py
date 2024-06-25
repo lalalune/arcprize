@@ -1,10 +1,9 @@
-from matplotlib import pyplot as plt
-
 import os
-import csv
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+
+from .args import checkpoint_path
 
 from .data import (
     PAD_TOKEN,
@@ -12,20 +11,19 @@ from .data import (
     END_SEQUENCE_TOKEN,
     START_EXAMPLE_TOKEN,
     END_EXAMPLE_TOKEN,
-    evaluating_file_paths,
-    unflatten_1d_to_2d,
-    gilbert2d
 )
-from .model import model, checkpoint_path, device
+from .gilbert2d import gilbert2d
+from .model import model, device
+from .args import checkpoint_path, args
 
-# import wandb
-
-
-def eval(checkpoint_path, device, filenames):
+def eval(checkpoint_path, device):
 
     # Load the test data
     # wandb.init(project="hilbert_predictor", job_type="eval")
-    test_data = np.load("processed_evaluating_data.pkl", allow_pickle=True)
+    if args.simple:
+        test_data = np.load("processed_evaluating_data_simple.pkl", allow_pickle=True)
+    else:
+        test_data = np.load("processed_evaluating_data.pkl", allow_pickle=True)
     test_inputs = [item[0] for item in test_data]
     test_targets = [item[1] for item in test_data]
 
@@ -57,12 +55,13 @@ def eval(checkpoint_path, device, filenames):
         for (src, tgt, dimensions) in test_loader:
             src, tgt, dimensions = src.to(device), tgt.to(device), dimensions.to(device)
             # Get the dims for Hilbert-aware position encoding
-            dimensions = tuple(dimensions.tolist()[0])
+            height, width = tuple(dimensions.tolist()[0])
 
             print("dimensions")
-            print(dimensions)
+            print((height, width))
             # Generate output sequence
-            output = model(src, dimensions)
+            output = model(src, (height, width))
+
             _, predicted = torch.max(output.data, -1)
 
             # Find the end of the actual sequence (ignoring padding)
@@ -175,8 +174,4 @@ def unflatten_1d_to_2d(array_1d, width, height):
             break
     return array_2d
 
-
-# get the filename from the path without the extension
-filenames = [os.path.splitext(os.path.basename(f))[0] for f in evaluating_file_paths]
-
-eval(checkpoint_path, device, filenames)
+eval(checkpoint_path, device)

@@ -68,21 +68,26 @@ class PositionEncoder(nn.Module):
     def forward(self, x, dimensions):
         if x.dim() != 3:
             raise ValueError(f"Expected input to be 3D, but got {x.dim()}D")
-        
+        # print(f"PositionEncoder - input shape: {x.shape}")
+        # print(f"PositionEncoder - dimensions: {dimensions}")
         batch_size, seq_len, _ = x.shape
-        height, width = dimensions
-        encodings = self.compute_encodings(height, width)
-        flattened_encodings = encodings.view(-1, self.feature_dim)
-        
-        # Repeat the encodings to match the batch size and sequence length
-        repeated_encodings = flattened_encodings.unsqueeze(0).repeat(batch_size, 1, 1)
-        
-        # If the sequence length is longer than the flattened encodings, repeat to match
-        if seq_len > repeated_encodings.size(1):
-            repeated_encodings = repeated_encodings.repeat(1, math.ceil(seq_len / repeated_encodings.size(1)), 1)
-        
-        # Truncate to match the sequence length
-        repeated_encodings = repeated_encodings[:, :seq_len, :]
+        height, width = dimensions[0]
+        # print(f"height: {height}, width: {width}")
+
+        if width == 0:
+            # Handle the case when width is zero
+            repeated_encodings = torch.zeros(batch_size, seq_len, self.feature_dim, device=x.device)
+        else:
+            encodings = self.compute_encodings(height, width)
+            # print(f"encodings.shape: {encodings.shape}")
+            flattened_encodings = encodings.view(-1, self.feature_dim)
+            # print(f"flattened_encodings.shape: {flattened_encodings.shape}")
+            
+            # Repeat the encodings to match the batch size and sequence length
+            repeated_encodings = flattened_encodings.unsqueeze(0).repeat(batch_size, 1, 1)
+            repeated_encodings = repeated_encodings[:, :seq_len, :]
+            
+            # print(f"repeated_encodings.shape: {repeated_encodings.shape}")
         
         # Move the repeated_encodings to the same device as the input tensor x
         repeated_encodings = repeated_encodings.to(x.device)
@@ -90,6 +95,7 @@ class PositionEncoder(nn.Module):
         # Combine the original input with the position encodings
         return torch.cat([x, repeated_encodings], dim=-1)
 
+    
 def test_position_encoder():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     encoder = PositionEncoder(32, 32, device)
