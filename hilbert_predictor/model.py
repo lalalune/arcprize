@@ -11,7 +11,7 @@ from .args import dropout_rate, batch_size
 from schedulefree import AdamWScheduleFree
 
 d_model = 128 - NUM_ENCODING_DIMENSIONS
-nhead = 2
+nhead = 1
 num_layers = 4
 dim_feedforward = 256
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
