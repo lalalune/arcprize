@@ -71,7 +71,6 @@ class PositionEncoder(nn.Module):
         # print(f"PositionEncoder - input shape: {x.shape}")
         # print(f"PositionEncoder - dimensions: {dimensions}")
         batch_size, seq_len, _ = x.shape
-        print("dimensions", dimensions)
         height, width = dimensions[0]
         # print(f"height: {height}, width: {width}")
 

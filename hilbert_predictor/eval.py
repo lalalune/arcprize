@@ -55,15 +55,11 @@ def eval(checkpoint_path, device):
     with torch.no_grad():
         for (src, tgt, dimensions) in test_loader:
             src, tgt = src.to(device), tgt.to(device)
-            print("eval dimensions")
-            print(dimensions)
-
             # Get the height and width from dimensions
             height, width = dimensions[0].tolist()
 
             # Create the appropriate dimensions for the PositionEncoder
             position_encoder_dimensions = [[MAX_CONTEXT_LENGTH // height, MAX_CONTEXT_LENGTH // width]]
-            print("dimensions", position_encoder_dimensions)
 
             # Generate output sequence
             output, _ = model(src, position_encoder_dimensions)
