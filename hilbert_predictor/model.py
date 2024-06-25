@@ -12,11 +12,11 @@ from schedulefree import AdamWScheduleFree
 # Model initialization tiny
 batch_size = 1
 if torch.cuda.is_available():
-    batch_size = 256
-d_model = 512 - NUM_ENCODING_DIMENSIONS
+    batch_size = 2048
+d_model = 128 - NUM_ENCODING_DIMENSIONS
 nhead = 8
 num_layers = 12
-dim_feedforward = 2048
+dim_feedforward = 1024
 dropout_rate = 0.1
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 checkpoint_path = Path("checkpoint.pt")
@@ -48,8 +48,8 @@ class DecoderOnlyTransformer(nn.Module):
                 for _ in range(num_layers)
             ]
         )
-        
-        self.optimizer = AdamWScheduleFree(self.parameters(), lr=0.003, warmup_steps=1000)
+        self.optimizer = AdamWScheduleFree(self.parameters(), lr=0.01)
+        # self.optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
 
         self.fc_out = nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, num_tokens + 1)
         self.to(device)
@@ -179,9 +179,6 @@ def test_model_with_zeros():
         device
     )
 
-    # Create an optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
     # Define loss function
     criterion = torch.nn.CrossEntropyLoss()
 
@@ -192,9 +189,9 @@ def test_model_with_zeros():
     loss = criterion(output.view(-1, NUM_TOKENS + 1), dummy_target.view(-1))
 
     # Backward pass and optimization
-    optimizer.zero_grad()
+    model.optimizer.zero_grad()
     loss.backward()
-    optimizer.step()
+    model.optimizer.step()
 
     print(f"Test completed. Loss: {loss.item()}")
 

@@ -40,6 +40,8 @@ def eval(checkpoint_path, device, filenames):
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
+    
+    # needed for schedule free optimization
     model.optimizer.eval()
 
     os.makedirs("prediction_plots", exist_ok=True)

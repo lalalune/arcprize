@@ -150,6 +150,8 @@ if __name__ == "__main__":
     # Training loop
     num_epochs = 10000
     model.train()
+    
+    # needed for schedule-free optimizer
     model.optimizer.train()
     
     if args.wandb:
@@ -184,11 +186,12 @@ if __name__ == "__main__":
 
             loss.backward()
             
+            # fastgrok, ignored for now
             # grads = gradfilter_ma(model, grads=grads)
             
             # Apply gradient clipping
-            max_grad_norm = 1.0  # Adjust this value as needed
-            clip_grad_norm(model.parameters(), max_grad_norm)
+            # max_grad_norm = 1.0  # Adjust this value as needed
+            # clip_grad_norm(model.parameters(), max_grad_norm)
 
             if (batch_idx + 1) % accumulation_steps == 0:
                 model.optimizer.step()
