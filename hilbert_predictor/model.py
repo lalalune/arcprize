@@ -156,7 +156,7 @@ class DecoderOnlyTransformer(nn.Module):
             NUM_TOKENS + 1,
         ), f"Expected shape {(batch_size, seq_len, NUM_TOKENS + 1)}, but got {output.shape}"
 
-        confidences = torch.argmax(output, dim=-1)
+        confidences = torch.softmax(output, dim=-1)
         return output, confidences
 
 
