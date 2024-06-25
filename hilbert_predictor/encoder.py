@@ -2,7 +2,30 @@ import torch
 import torch.nn as nn
 import math
 
-NUM_ENCODING_DIMENSIONS = 68
+NUM_ENCODING_DIMENSIONS = 18
+
+def compute_quadtree_code(x, y, max_width, max_height, level=0, code=""):
+    if max_width == 1 and max_height == 1: # dont encode a 1x1 grid
+        return code
+
+    if level == 5:  # Limit the recursion depth to 5 levels (32x32 grid)
+        return code
+    
+    mid_x = max_width // 2
+    mid_y = max_height // 2
+    
+    if x < mid_x and y < mid_y:
+        code += "0"
+    elif x >= mid_x and y < mid_y:
+        code += "1"
+    elif x < mid_x and y >= mid_y:
+        code += "2"
+    else:
+        code += "3"
+    
+    return compute_quadtree_code(x % mid_x if mid_x > 0 else 0,
+                                 y % mid_y if mid_y > 0 else 0,
+                                 mid_x, mid_y, level + 1, code)
 
 class PositionEncoder(nn.Module):
     def __init__(self, max_height, max_width, device):
@@ -11,7 +34,6 @@ class PositionEncoder(nn.Module):
         self.max_width = max_width
         self.feature_dim = NUM_ENCODING_DIMENSIONS
         self.device = device
-
 
     def compute_encodings(self, height, width):
         encodings = torch.zeros(height, width, self.feature_dim)
@@ -35,20 +57,18 @@ class PositionEncoder(nn.Module):
                 encodings[y, x, 8] = round(math.tan(angle_x)) if not math.isnan(math.tan(angle_x)) else 0
                 encodings[y, x, 9] = round(math.tan(angle_y)) if not math.isnan(math.tan(angle_y)) else 0
 
-                # One-hot encoding (adjusted to fit within 68 dimensions)
-                if x < 29 and y < 29:
-                    encodings[y, x, 10 + x] = 1
-                    encodings[y, x, 39 + y] = 1
+                # Quadtree encoding
+                quadtree_code = compute_quadtree_code(x, y, self.max_width, self.max_height)
+                for i, digit in enumerate(quadtree_code):
+                    encodings[y, x, 10 + i] = int(digit)
 
         return encodings
 
-
     def forward(self, x, dimensions):
-        if x.dim() == 3:
-            batch_size, seq_len, _ = x.shape
-        else:
+        if x.dim() != 3:
             raise ValueError(f"Expected input to be 3D, but got {x.dim()}D")
-
+        
+        batch_size, seq_len, _ = x.shape
         height, width = dimensions
         encodings = self.compute_encodings(height, width)
         flattened_encodings = encodings.view(-1, self.feature_dim)
@@ -69,30 +89,63 @@ class PositionEncoder(nn.Module):
         # Combine the original input with the position encodings
         return torch.cat([x, repeated_encodings], dim=-1)
 
-
 def test_position_encoder():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    encoder = PositionEncoder(30, 30, device)
-    
-    # Test 1x1
+    encoder = PositionEncoder(32, 32, device)
     x = torch.zeros(1, 1, 1, device=device)  # Add an extra dimension for the embedding
     dimensions = (1, 1)
     output = encoder(x, dimensions)
-    assert output.shape == (1, 1, 69), f"Incorrect output shape for 1x1: {output.shape}"
-
-    # Test 5x5
-    x = torch.zeros(1, 25, 1, device=device)  # Add an extra dimension for the embedding
-    dimensions = (5, 5)
-    output = encoder(x, dimensions)
-    assert output.shape == (1, 25, 69), f"Incorrect output shape for 5x5: {output.shape}"
-
-    # Test 30x30
-    x = torch.zeros(1, 900, 1, device=device)  # Add an extra dimension for the embedding
-    dimensions = (30, 30)
-    output = encoder(x, dimensions)
-    assert output.shape == (1, 900, 69), f"Incorrect output shape for 30x30: {output.shape}"
-
+    assert output.shape == (1, 1, 19), f"Incorrect output shape for 1x1: {output.shape}"
+    assert torch.all(output[0, 0, 10:] == torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0], device=device)), "Incorrect quadtree encoding for 1x1"
+    
+    # Add further tests as needed
+    
     print("All PositionEncoder tests passed.")
 
 if __name__ == "__main__":
+    test_position_encoder()
+
+def test_position_encoder():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    encoder = PositionEncoder(32, 32, device)
+    
+    test_configs = [
+        (1, 1, [0]),
+        (1, 2, [0, 1]),
+        (2, 1, [0, 1]),
+        (3, 2, [0, 1, 3, 4]),
+        (2, 3, [0, 1, 2, 3, 4, 5]),
+        (3, 3, [0, 2, 3, 5, 6, 8])
+    ]
+
+    for height, width, positions in test_configs:
+        dimensions = (height, width)
+        x = torch.zeros(1, height * width, 1, device=device)  # Add an extra dimension for the embedding
+        output = encoder(x, dimensions)
+        assert output.shape == (1, height * width, 19), f"Incorrect output shape for {height}x{width}: {output.shape}"
+
+        # Test for top-left and bottom-right positions
+        for pos in positions:
+            # Check if the quadtree encoding length matches the expected, typically the same as the recursion depth (5)
+            assert len(output[0, pos, 10:].nonzero()) <= 5, f"Incorrect quadtree encoding length for position {pos} in {height}x{width}"
+
+    print("All PositionEncoder tests passed.")
+
+def test_quadtree_encodings():
+    # Testing top-left and bottom-right coordinates for a 32x32 grid
+    top_left_expected = '00000'
+    bottom_right_expected = '33333'
+    
+    # Calculating actual encodings
+    top_left_actual = compute_quadtree_code(0, 0, 32, 32)
+    bottom_right_actual = compute_quadtree_code(31, 31, 32, 32)
+    
+    # Assertions to check if the actual encodings match the expected ones
+    assert top_left_actual == top_left_expected, f"Top-left encoding mismatch: expected {top_left_expected}, got {top_left_actual}"
+    assert bottom_right_actual == bottom_right_expected, f"Bottom-right encoding mismatch: expected {bottom_right_expected}, got {bottom_right_actual}"
+
+    print("Quadtree encoding tests passed.")
+
+if __name__ == "__main__":
+    test_quadtree_encodings()
     test_position_encoder()

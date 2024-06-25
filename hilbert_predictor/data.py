@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import random
 
+from .args import args
 from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
 
 # Token definitions
@@ -27,6 +28,9 @@ MAX_SEQUENCE_LENGTH = 1024 + 128
 MAX_PREDICTION_LENGTH = 128
 
 evaluating_data = None
+
+simple_dataset = "arc-datasets/datasets/bitdata/"
+
 
 # Gilbert2D - Generalized Hilbert Curve for 2D space-filling
 def gilbert2d(width, height):
@@ -142,8 +146,6 @@ def load_mapping_table(filename='mapping_table.pkl'):
     with open(filename, 'rb') as f:
         return pickle.load(f)
 
-
-
 def unflatten_1d_to_2d(array_1d, width, height):
     array_2d = [[None] * width for _ in range(height)]
     for idx, (x, y) in enumerate(gilbert2d(width, height)):
@@ -206,7 +208,6 @@ def process_data(data_list):
 
     return processed_data
 
-
 def is_within_bounds(data, max_dim=9):
     """
     Check if any matrix in the train or test datasets exceeds the maximum dimensions.
@@ -232,12 +233,14 @@ def load_and_process_training_data(file_paths):
     print(f"Total processed data points: {len(processed_data)}")
     return processed_data
 
+if args.simple:
+    training_data_dir = simple_dataset + "training"
+    evaluating_data_dir = simple_dataset + "evaluation"
 
-
-# Rest of the code remains the same
-training_data_dir = "./data/training"
-additional_training_data_dir = "./data/additional_training"
-evaluating_data_dir = "./data/evaluation"
+else:
+    # Rest of the code remains the same
+    training_data_dir = "./data/training"
+    evaluating_data_dir = "./data/evaluation"
 
 # if 
 training_file_paths = [
@@ -266,9 +269,13 @@ else:
     print("arc-datasets folder not found. Proceeding with original data only.")
     print("arc_datasets_dir", arc_datasets_dir)
 
-# Check if processed data files exist
-processed_training_file = "processed_training_data.pkl"
-processed_evaluating_file = "processed_evaluating_data.pkl"
+if args.simple:
+    processed_training_file = "processed_training_data_simple.pkl"
+    processed_evaluating_file = "processed_evaluating_data_simple.pkl"
+else:
+    # Check if processed data files exist
+    processed_training_file = "processed_training_data.pkl"
+    processed_evaluating_file = "processed_evaluating_data.pkl"
 
 if os.path.exists(processed_training_file) and os.path.exists(
     processed_evaluating_file

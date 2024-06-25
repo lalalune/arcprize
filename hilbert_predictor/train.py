@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-import argparse
 from .model import (
     model,
     checkpoint_path,
@@ -22,6 +21,7 @@ from .data import (
     PAD_TOKEN,
     training_data,
 )
+from .args import args
 from torch.cuda.amp import autocast, GradScaler
 from torch.nn import CrossEntropyLoss
 from collections import deque
@@ -137,11 +137,6 @@ if __name__ == "__main__":
         
     # Load checkpoint if it exists
     start_epoch = 0
-    parser = argparse.ArgumentParser(description="Train the model")
-    parser.add_argument(
-        "--wandb", action="store_true", help="Enable Weights & Biases logging"
-    )
-    args = parser.parse_args()
 
     criterion = CrossEntropyLoss(ignore_index=PAD_TOKEN)
     # Prepare data loaders
@@ -198,6 +193,9 @@ if __name__ == "__main__":
             if (batch_idx + 1) % accumulation_steps == 0:
                 model.optimizer.step()
                 model.optimizer.zero_grad()
+            
+            # compute total batches
+            print(f"Epoch {epoch+1}, Batch {batch_idx+1}, Loss: {loss.item():.4f}")
 
             total_loss += loss.item()
 
