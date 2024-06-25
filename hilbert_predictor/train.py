@@ -26,7 +26,7 @@ from torch.cuda.amp import autocast, GradScaler
 from torch.nn import CrossEntropyLoss
 from collections import deque
 from typing import Dict, Optional, Literal
-
+from torch.nn.utils import clip_grad_norm
 def gradfilter_ma(
     m: nn.Module,
     grads: Optional[Dict[str, deque]] = None,
@@ -123,11 +123,14 @@ if __name__ == "__main__":
     )
 
     # Loss function and optimizer
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
     if os.path.exists(checkpoint_path):
         checkpoint = torch.load(checkpoint_path)
         model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if 'optimizer_state_dict' in checkpoint:
+            try:
+                model.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            except:
+                print("Optimizer state dict not found in checkpoint.")
         start_epoch = checkpoint['epoch'] + 1
         grads = checkpoint.get('grads', None)
         
@@ -151,7 +154,9 @@ if __name__ == "__main__":
     )
     # Training loop
     num_epochs = 10000
-
+    model.train()
+    model.optimizer.train()
+    
     if args.wandb:
         import wandb
         wandb.init(
@@ -168,18 +173,10 @@ if __name__ == "__main__":
             },
             resume="auto"
         )
-    if checkpoint_path.exists():
-        checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        start_epoch = checkpoint["epoch"] + 1
-        print(f"Resuming training from epoch {start_epoch}")
-
 
     for epoch in range(start_epoch, num_epochs):
-        model.train()
         total_loss = 0
-        optimizer.zero_grad()
+        model.optimizer.zero_grad()
 
         for batch_idx, (src, tgt, src_lengths, tgt_lengths) in enumerate(train_loader):
             src, tgt = src.to(device), tgt.to(device)
@@ -193,17 +190,21 @@ if __name__ == "__main__":
             loss.backward()
             
             # grads = gradfilter_ma(model, grads=grads)
+            
+            # Apply gradient clipping
+            max_grad_norm = 1.0  # Adjust this value as needed
+            clip_grad_norm(model.parameters(), max_grad_norm)
 
             if (batch_idx + 1) % accumulation_steps == 0:
-                optimizer.step()
-                optimizer.zero_grad()
+                model.optimizer.step()
+                model.optimizer.zero_grad()
 
             total_loss += loss.item()
 
         # If there are any accumulation steps left, do a final step
         if (batch_idx + 1) % accumulation_steps != 0:
-            optimizer.step()
-            optimizer.zero_grad()
+            model.optimizer.step()
+            model.optimizer.zero_grad()
 
         avg_loss = total_loss / len(train_loader)
         print(f"Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}")
@@ -212,7 +213,7 @@ if __name__ == "__main__":
             {
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
+                "optimizer_state_dict": model.optimizer.state_dict(),
                 "loss": loss.item(),
                 "grads": grads,
             },

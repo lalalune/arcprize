@@ -7,11 +7,12 @@ from xformers.components.attention import ScaledDotProduct
 from .data import NUM_TOKENS, PAD_TOKEN, MAX_CONTEXT_LENGTH, MAX_SEQUENCE_LENGTH, MAX_PREDICTION_LENGTH
 from torch.utils.checkpoint import checkpoint
 from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
+from schedulefree import AdamWScheduleFree
 
 # Model initialization tiny
 batch_size = 1
 if torch.cuda.is_available():
-    batch_size = 64
+    batch_size = 256
 d_model = 512 - NUM_ENCODING_DIMENSIONS
 nhead = 8
 num_layers = 12
@@ -47,6 +48,8 @@ class DecoderOnlyTransformer(nn.Module):
                 for _ in range(num_layers)
             ]
         )
+        
+        self.optimizer = AdamWScheduleFree(self.parameters(), lr=0.003, warmup_steps=1000)
 
         self.fc_out = nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, num_tokens + 1)
         self.to(device)
@@ -76,6 +79,8 @@ class DecoderOnlyTransformer(nn.Module):
 
     def forward(self, src, dimensions):
         assert src.dim() == 2, f"Expected input to be 2D, but got {src.dim()}D"
+        assert isinstance(dimensions, tuple), f"Expected dimensions to be a tuple, but got {type(dimensions)}"
+        assert len(dimensions) == 2, f"Expected dimensions to have length 2, but got {len(dimensions)}"
 
         x = self.token_embedding(src)
         assert x.shape == (

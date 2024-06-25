@@ -1,2 +1,4 @@
 torch
 numpy==1.26.0
+xformers
+schedulefree
