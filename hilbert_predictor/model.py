@@ -4,7 +4,7 @@ from xformers.components import MultiHeadDispatch
 from xformers.components.attention import ScaledDotProduct
 from torch.utils.checkpoint import checkpoint
 
-from .data import NUM_TOKENS, PAD_TOKEN, MAX_SEQUENCE_LENGTH
+from .data import MAX_CONTEXT_LENGTH, NUM_TOKENS, PAD_TOKEN, MAX_SEQUENCE_LENGTH
 from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
 from .args import dropout_rate, batch_size
 
@@ -35,7 +35,7 @@ class DecoderOnlyTransformer(nn.Module):
         self.nhead = nhead
         self.embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
         self.token_embedding = nn.Embedding(num_tokens, d_model, padding_idx=PAD_TOKEN)
-        self.position_encoder = PositionEncoder(30, 30, device=device)
+        self.position_encoder = PositionEncoder(5, 5, device=device)
 
         self.layers = nn.ModuleList(
             [
@@ -75,8 +75,6 @@ class DecoderOnlyTransformer(nn.Module):
     def forward(self, src, dimensions):
         # print(f"DecoderOnlyTransformer - input shape: {src.shape}")
         # print(f"DecoderOnlyTransformer - dimensions: {dimensions}")
-
-        height, width = dimensions[0]
         # print(f"DecoderOnlyTransformer - height: {height}, width: {width}")
         
         # Clamp the input values to be within the valid range
@@ -158,7 +156,7 @@ class DecoderOnlyTransformer(nn.Module):
             NUM_TOKENS + 1,
         ), f"Expected shape {(batch_size, seq_len, NUM_TOKENS + 1)}, but got {output.shape}"
 
-        confidences = torch.softmax(output, dim=-1)
+        confidences = torch.argmax(output, dim=-1)
         return output, confidences
 
 
@@ -176,24 +174,26 @@ model = DecoderOnlyTransformer(
 
 def test_model_with_zeros():
     # Create dummy input data (zeros)
-    dummy_input = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(device)
+    dummy_input = torch.full((batch_size, MAX_SEQUENCE_LENGTH), PAD_TOKEN, dtype=torch.long).to(device)
+    dummy_input[:, :MAX_CONTEXT_LENGTH] = torch.randint(0, NUM_TOKENS, (batch_size, MAX_CONTEXT_LENGTH), device=device)
 
     # Create dummy dimensions
-    dummy_dimensions = (10, 10)  # Example dimensions
+    dummy_dimensions = [[MAX_CONTEXT_LENGTH // 5, MAX_CONTEXT_LENGTH // 5]]  # Example dimensions
 
     # Set the model to training mode
     model.train()
 
     # Create a dummy target (zeros)
-    dummy_target = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(
+    dummy_target = torch.full((batch_size, MAX_SEQUENCE_LENGTH), PAD_TOKEN, dtype=torch.long).to(
         device
     )
+    dummy_target[:, :MAX_CONTEXT_LENGTH] = torch.randint(0, NUM_TOKENS, (batch_size, MAX_CONTEXT_LENGTH), device=device)
 
     # Define loss function
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
 
     # Perform a forward pass
-    output = model(dummy_input, dummy_dimensions)
+    output, _ = model(dummy_input, dummy_dimensions)
 
     # Calculate loss
     loss = criterion(output.view(-1, NUM_TOKENS + 1), dummy_target.view(-1))
@@ -206,15 +206,17 @@ def test_model_with_zeros():
     print(f"Test completed. Loss: {loss.item()}")
 
 
+
 def test_position_encodings():
     # Create dummy input data (zeros)
     dummy_input = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(device)
+    dummy_input[:, :MAX_CONTEXT_LENGTH] = torch.randint(0, NUM_TOKENS, (batch_size, MAX_CONTEXT_LENGTH), device=device)
 
     # Create dummy dimensions
-    dummy_dimensions = (10, 10)  # Example dimensions
+    dummy_dimensions = [[MAX_CONTEXT_LENGTH // 5, MAX_CONTEXT_LENGTH // 5]]  # Example dimensions
 
     # Perform a forward pass
-    output = model(dummy_input, dummy_dimensions)
+    output, _ = model(dummy_input, dummy_dimensions)
 
     # Check if the output has the correct shape
     assert output.shape == (
@@ -224,7 +226,7 @@ def test_position_encodings():
     ), f"Expected shape {(batch_size, MAX_SEQUENCE_LENGTH, NUM_TOKENS + 1)}, but got {output.shape}"
 
     # Check if the position encodings are not all zeros
-    assert not torch.allclose(output[:, :, :-1], torch.zeros_like(output[:, :, :-1])), "Position encodings are all zeros"
+    assert not torch.allclose(output[:, :MAX_CONTEXT_LENGTH, :-1], torch.zeros_like(output[:, :MAX_CONTEXT_LENGTH, :-1])), "Position encodings are all zeros"
 
     print("Position encodings test passed.")
 

@@ -71,6 +71,7 @@ class PositionEncoder(nn.Module):
         # print(f"PositionEncoder - input shape: {x.shape}")
         # print(f"PositionEncoder - dimensions: {dimensions}")
         batch_size, seq_len, _ = x.shape
+        print("dimensions", dimensions)
         height, width = dimensions[0]
         # print(f"height: {height}, width: {width}")
 
@@ -100,8 +101,9 @@ def test_position_encoder():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     encoder = PositionEncoder(32, 32, device)
     x = torch.zeros(1, 1, 1, device=device)  # Add an extra dimension for the embedding
-    dimensions = (1, 1)
+    dimensions = [[1, 1]]
     output = encoder(x, dimensions)
+
     assert output.shape == (1, 1, 19), f"Incorrect output shape for 1x1: {output.shape}"
     assert torch.all(output[0, 0, 10:] == torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0], device=device)), "Incorrect quadtree encoding for 1x1"
     
@@ -126,7 +128,7 @@ def test_position_encoder():
     ]
 
     for height, width, positions in test_configs:
-        dimensions = (height, width)
+        dimensions = [[height, width]]
         x = torch.zeros(1, height * width, 1, device=device)  # Add an extra dimension for the embedding
         output = encoder(x, dimensions)
         assert output.shape == (1, height * width, 19), f"Incorrect output shape for {height}x{width}: {output.shape}"

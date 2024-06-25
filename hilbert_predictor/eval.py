@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from .args import checkpoint_path
 
 from .data import (
+    MAX_CONTEXT_LENGTH,
     PAD_TOKEN,
     START_SEQUENCE_TOKEN,
     END_SEQUENCE_TOKEN,
@@ -53,16 +54,22 @@ def eval(checkpoint_path, device):
 
     with torch.no_grad():
         for (src, tgt, dimensions) in test_loader:
-            src, tgt, dimensions = src.to(device), tgt.to(device), dimensions.to(device)
-            # Get the dims for Hilbert-aware position encoding
-            height, width = tuple(dimensions.tolist()[0])
+            src, tgt = src.to(device), tgt.to(device)
+            print("eval dimensions")
+            print(dimensions)
 
-            print("dimensions")
-            print((height, width))
+            # Get the height and width from dimensions
+            height, width = dimensions[0].tolist()
+
+            # Create the appropriate dimensions for the PositionEncoder
+            position_encoder_dimensions = [[MAX_CONTEXT_LENGTH // height, MAX_CONTEXT_LENGTH // width]]
+            print("dimensions", position_encoder_dimensions)
+
             # Generate output sequence
-            output = model(src, (height, width))
+            output, _ = model(src, position_encoder_dimensions)
 
             _, predicted = torch.max(output.data, -1)
+
 
             # Find the end of the actual sequence (ignoring padding)
             tgt_end_idx = (tgt == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[1][0]

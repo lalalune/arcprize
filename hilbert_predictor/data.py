@@ -58,41 +58,37 @@ def process_data(data_list):
         train_examples = data["train"]
         test_examples = data["test"]
 
-        # Randomize train examples to prevent sequence memorization
-        random.shuffle(train_examples)
+        random.shuffle(train_examples)  # Randomize train examples
 
         for test_example in test_examples:
             context = [START_SEQUENCE_TOKEN]
             # Use all other examples as part of the input context
             for ex in train_examples + test_examples:
                 if ex != test_example:  # Exclude the current test case from context
-                    input_flat = flatten_2d_to_1d(np.array(ex['input']))
-                    output_flat = flatten_2d_to_1d(np.array(ex['output']))
+                    input_matrix = np.atleast_2d(ex['input'])
+                    output_matrix = np.atleast_2d(ex['output'])
+                    input_flat = flatten_2d_to_1d(input_matrix)
+                    output_flat = flatten_2d_to_1d(output_matrix)
                     context.extend([START_EXAMPLE_TOKEN, START_INPUT_MATRIX_TOKEN] + input_flat +
                                    [END_INPUT_MATRIX_TOKEN, START_OUTPUT_MATRIX_TOKEN] + output_flat +
                                    [END_OUTPUT_MATRIX_TOKEN, END_EXAMPLE_TOKEN])
             
             # Now process the actual test case
-            test_input = np.array(test_example['input'])
-            dimensions = np.array(test_input.shape).reshape(1, 2)  
-            print(f"Test input shape: {test_input.shape}")  # Add this line to check the shape
-            
+            test_input = np.atleast_2d(test_example['input'])
             test_input_flat = flatten_2d_to_1d(test_input)
-            test_output_flat = flatten_2d_to_1d(np.array(test_example['output']))
+            test_output_flat = flatten_2d_to_1d(np.atleast_2d(test_example['output']))
 
             context.extend([START_EXAMPLE_TOKEN, START_INPUT_MATRIX_TOKEN] + test_input_flat + [END_INPUT_MATRIX_TOKEN])
             context = pad_sequence(context, MAX_CONTEXT_LENGTH, PAD_TOKEN, left_pad=True)
             target = pad_sequence([START_OUTPUT_MATRIX_TOKEN] + test_output_flat + [END_OUTPUT_MATRIX_TOKEN, END_SEQUENCE_TOKEN], MAX_PREDICTION_LENGTH, PAD_TOKEN)
-            
-            dimensions = np.array(test_input.shape)
-            print(f"Processed data: Context: {context}")
-            print(f"Processed data: Target: {target}")
-            print(f"Processed data: Dimensions: {dimensions}")  # This should now correctly print dimensions without error
 
-            # Append the tuple with dimensions
+            dimensions = test_input.shape  # Already 2D due to atleast_2d
+            print(f"Processed data: Dimensions: {dimensions}")
+
             processed_data.append((np.array(context), np.array(target), dimensions))
 
     return processed_data
+
 
 def is_within_bounds(data, max_dim=9):
     """

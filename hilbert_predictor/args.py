@@ -7,7 +7,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--simple', action='store_true', help='Load data only from the "arc-datasets/datasets/bitdata/training" directory')
 parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases logging")
 
-batch_size = 1
+batch_size = 4
 if torch.cuda.is_available():
     batch_size = 64
 parser.add_argument("--batch_size", type=int, default=batch_size, help="Batch size for training")
