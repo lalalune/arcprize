@@ -32,6 +32,7 @@ def eval(checkpoint_path, device, filenames):
     test_dataset = TensorDataset(
         torch.tensor(test_inputs, dtype=torch.long),
         torch.tensor(test_targets, dtype=torch.long),
+        torch.tensor([item[2] for item in test_data], dtype=torch.long),  
     )
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
@@ -39,6 +40,9 @@ def eval(checkpoint_path, device, filenames):
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
+    
+    # needed for schedule free optimization
+    model.optimizer.eval()
 
     os.makedirs("prediction_plots", exist_ok=True)
 
@@ -49,111 +53,87 @@ def eval(checkpoint_path, device, filenames):
     completely_correct = 0
     total_predictions = 0
 
-    with open("predictions.csv", "w", newline="") as csvfile:
-        csvwriter = csv.writer(csvfile)
-        csvwriter.writerow(
-            [
-                "Filename",
-                "Input",
-                "Predicted",
-                "Target",
-                "Completely Correct",
-                "Non-Zero Accuracy",
+    with torch.no_grad():
+        for (src, tgt, dimensions) in test_loader:
+            src, tgt, dimensions = src.to(device), tgt.to(device), dimensions.to(device)
+            # Get the dims for Hilbert-aware position encoding
+            dimensions = tuple(dimensions.tolist()[0])
+
+            print("dimensions")
+            print(dimensions)
+            # Generate output sequence
+            output = model(src, dimensions)
+            _, predicted = torch.max(output.data, -1)
+
+            # Find the end of the actual sequence (ignoring padding)
+            tgt_end_idx = (tgt == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[1][0]
+            pred_end_idx = (predicted == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[
+                1
             ]
-        )
+            pred_end_idx = (
+                pred_end_idx[0] if pred_end_idx.numel() > 0 else predicted.size(1)
+            )
 
-        with torch.no_grad():
-            for (src, tgt), filename in zip(test_loader, filenames):
-                src, tgt = src.to(device), tgt.to(device)
+            # Extract the relevant parts of the sequences
+            predicted = predicted[:, :pred_end_idx]
+            target = tgt[:, :tgt_end_idx]
 
-                # Get the dims for Hilbert-aware position encoding
-                dimensions = src.size(1), src.size(2)  # Pass the dimensions of the input
-                # Generate output sequence
-                output = model(src, dimensions)
-                _, predicted = torch.max(output.data, -1)
+            # Remove special tokens
+            special_tokens = [
+                PAD_TOKEN,
+                START_SEQUENCE_TOKEN,
+                END_SEQUENCE_TOKEN,
+                START_EXAMPLE_TOKEN,
+                END_EXAMPLE_TOKEN,
+            ]
 
-                # Find the end of the actual sequence (ignoring padding)
-                tgt_end_idx = (tgt == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[1][0]
-                pred_end_idx = (predicted == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[
-                    1
-                ]
-                pred_end_idx = (
-                    pred_end_idx[0] if pred_end_idx.numel() > 0 else predicted.size(1)
-                )
+            def remove_special_tokens(seq):
+                return [token for token in seq if token not in special_tokens]
 
-                # Extract the relevant parts of the sequences
-                predicted = predicted[:, :pred_end_idx]
-                target = tgt[:, :tgt_end_idx]
+            predicted_clean = remove_special_tokens(predicted[0].cpu().tolist())
+            target_clean = remove_special_tokens(target[0].cpu().tolist())
 
-                # Remove special tokens
-                special_tokens = [
-                    PAD_TOKEN,
-                    START_SEQUENCE_TOKEN,
-                    END_SEQUENCE_TOKEN,
-                    START_EXAMPLE_TOKEN,
-                    END_EXAMPLE_TOKEN,
-                ]
+            # Convert back to tensors
+            predicted_clean = torch.tensor(predicted_clean, device=device)
+            target_clean = torch.tensor(target_clean, device=device)
 
-                def remove_special_tokens(seq):
-                    return [token for token in seq if token not in special_tokens]
+            # Truncate to the shorter length
+            min_len = min(len(predicted_clean), len(target_clean))
+            predicted_clean = predicted_clean[:min_len]
+            target_clean = target_clean[:min_len]
 
-                predicted_clean = remove_special_tokens(predicted[0].cpu().tolist())
-                target_clean = remove_special_tokens(target[0].cpu().tolist())
+            correct = (predicted_clean == target_clean).sum().item()
+            total_correct += correct
+            total_tokens += len(target_clean)
 
-                # Convert back to tensors
-                predicted_clean = torch.tensor(predicted_clean, device=device)
-                target_clean = torch.tensor(target_clean, device=device)
+            non_zero_mask = target_clean != 0
+            non_zero_correct = (
+                ((predicted_clean == target_clean) & non_zero_mask).sum().item()
+            )
+            total_non_zero_correct += non_zero_correct
+            total_non_zero_tokens += non_zero_mask.sum().item()
 
-                # Truncate to the shorter length
-                min_len = min(len(predicted_clean), len(target_clean))
-                predicted_clean = predicted_clean[:min_len]
-                target_clean = target_clean[:min_len]
+            input_seq = remove_special_tokens(src[0].cpu().tolist())
+            predicted_seq = predicted_clean.cpu().numpy()
+            target_seq = target_clean.cpu().numpy()
 
-                correct = (predicted_clean == target_clean).sum().item()
-                total_correct += correct
-                total_tokens += len(target_clean)
+            is_completely_correct = np.array_equal(predicted_seq, target_seq)
+            completely_correct += int(is_completely_correct)
+            total_predictions += 1
 
-                non_zero_mask = target_clean != 0
-                non_zero_correct = (
-                    ((predicted_clean == target_clean) & non_zero_mask).sum().item()
-                )
-                total_non_zero_correct += non_zero_correct
-                total_non_zero_tokens += non_zero_mask.sum().item()
+            # Calculate non-zero accuracy for this prediction
+            non_zero_mask = target_seq != 0
+            non_zero_correct = np.sum((predicted_seq == target_seq) & non_zero_mask)
+            non_zero_total = np.sum(non_zero_mask)
+            non_zero_accuracy = (
+                non_zero_correct / non_zero_total if non_zero_total > 0 else 0
+            )
 
-                input_seq = remove_special_tokens(src[0].cpu().tolist())
-                predicted_seq = predicted_clean.cpu().numpy()
-                target_seq = target_clean.cpu().numpy()
-
-                is_completely_correct = np.array_equal(predicted_seq, target_seq)
-                completely_correct += int(is_completely_correct)
-                total_predictions += 1
-
-                # Calculate non-zero accuracy for this prediction
-                non_zero_mask = target_seq != 0
-                non_zero_correct = np.sum((predicted_seq == target_seq) & non_zero_mask)
-                non_zero_total = np.sum(non_zero_mask)
-                non_zero_accuracy = (
-                    non_zero_correct / non_zero_total if non_zero_total > 0 else 0
-                )
-
-                csvwriter.writerow(
-                    [
-                        filename,
-                        input_seq,
-                        predicted_seq.tolist(),
-                        target_seq.tolist(),
-                        is_completely_correct,
-                        non_zero_accuracy,
-                    ]
-                )
-
-                print(f"Input: {input_seq}")
-                print(f"Predicted: {predicted_seq}")
-                print(f"Target: {target_seq}")
-                print(f"Completely correct: {is_completely_correct}")
-                print(f"Non-zero accuracy: {non_zero_accuracy:.4f}")
-
-                plot_hilbert_curves(input_seq, predicted_seq, target_seq, 0, filename)
+            print(f"Input: {input_seq}")
+            print(f"Predicted: {predicted_seq}")
+            print(f"Target: {target_seq}")
+            print(f"Completely correct: {is_completely_correct}")
+            print(f"Non-zero accuracy: {non_zero_accuracy:.4f}")
 
     overall_accuracy = total_correct / total_tokens if total_tokens > 0 else 0
     overall_non_zero_accuracy = (
@@ -183,46 +163,6 @@ def eval(checkpoint_path, device, filenames):
     #     "overall_non_zero_accuracy": overall_non_zero_accuracy,
     #     "completely_correct_percentage": completely_correct_percentage,
     # })
-
-
-def plot_hilbert_curves(input_seq, predicted_seq, target_seq, sample_index, filename):
-    # Convert input_seq to a list if it's not already
-    if not isinstance(input_seq, (list, np.ndarray)):
-        input_seq = [input_seq]
-
-    # Remove padding tokens (value PAD_TOKEN)
-    input_seq = [x for x in input_seq if x != PAD_TOKEN]
-    predicted_seq = predicted_seq[predicted_seq != PAD_TOKEN]
-    target_seq = target_seq[target_seq != PAD_TOKEN]
-
-    # Ensure predicted_seq is the same length as target_seq
-    predicted_seq = predicted_seq[: len(target_seq)]
-
-    # Calculate the size of the grids
-    input_height = int(np.ceil(np.sqrt(len(input_seq))))
-    input_width = int(np.ceil(len(input_seq) / input_height))
-
-    target_height = int(np.ceil(np.sqrt(len(target_seq))))
-    target_width = int(np.ceil(len(target_seq) / target_height))
-
-    # Unflatten the sequences into 2D grids
-    input_grid = unflatten_1d_to_2d(np.array(input_seq), input_width, input_height)
-    predicted_grid = unflatten_1d_to_2d(predicted_seq, target_width, target_height)
-    target_grid = unflatten_1d_to_2d(target_seq, target_width, target_height)
-
-    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-    grids = [input_grid, predicted_grid, target_grid]
-    titles = ["Input", "Predicted", "Target"]
-
-    for ax, grid, title in zip(axs, grids, titles):
-        im = ax.imshow(grid, cmap="tab10", vmin=0, vmax=9)
-        ax.set_title(title)
-        ax.axis("off")
-
-    plt.colorbar(im, ax=axs.ravel().tolist(), label="Token Value")
-    plt.tight_layout()
-    plt.savefig(f"prediction_plots/hilbert_prediction_{sample_index}_{filename}.png")
-    plt.close(fig)
 
 
 # Update the unflatten_1d_to_2d function in gilbert2d.py:

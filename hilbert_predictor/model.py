@@ -7,15 +7,16 @@ from xformers.components.attention import ScaledDotProduct
 from .data import NUM_TOKENS, PAD_TOKEN, MAX_CONTEXT_LENGTH, MAX_SEQUENCE_LENGTH, MAX_PREDICTION_LENGTH
 from torch.utils.checkpoint import checkpoint
 from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
+from schedulefree import AdamWScheduleFree
 
 # Model initialization tiny
 batch_size = 1
 if torch.cuda.is_available():
-    batch_size = 32
-d_model = 512 - NUM_ENCODING_DIMENSIONS
+    batch_size = 2048
+d_model = 128 - NUM_ENCODING_DIMENSIONS
 nhead = 8
 num_layers = 12
-dim_feedforward = 2048
+dim_feedforward = 1024
 dropout_rate = 0.1
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 checkpoint_path = Path("checkpoint.pt")
@@ -47,6 +48,8 @@ class DecoderOnlyTransformer(nn.Module):
                 for _ in range(num_layers)
             ]
         )
+        self.optimizer = AdamWScheduleFree(self.parameters(), lr=0.01)
+        # self.optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
 
         self.fc_out = nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, num_tokens + 1)
         self.to(device)
@@ -76,6 +79,8 @@ class DecoderOnlyTransformer(nn.Module):
 
     def forward(self, src, dimensions):
         assert src.dim() == 2, f"Expected input to be 2D, but got {src.dim()}D"
+        assert isinstance(dimensions, tuple), f"Expected dimensions to be a tuple, but got {type(dimensions)}"
+        assert len(dimensions) == 2, f"Expected dimensions to have length 2, but got {len(dimensions)}"
 
         x = self.token_embedding(src)
         assert x.shape == (
@@ -174,9 +179,6 @@ def test_model_with_zeros():
         device
     )
 
-    # Create an optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
     # Define loss function
     criterion = torch.nn.CrossEntropyLoss()
 
@@ -187,9 +189,9 @@ def test_model_with_zeros():
     loss = criterion(output.view(-1, NUM_TOKENS + 1), dummy_target.view(-1))
 
     # Backward pass and optimization
-    optimizer.zero_grad()
+    model.optimizer.zero_grad()
     loss.backward()
-    optimizer.step()
+    model.optimizer.step()
 
     print(f"Test completed. Loss: {loss.item()}")
 

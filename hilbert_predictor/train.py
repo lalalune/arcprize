@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-import argparse
 from .model import (
     model,
     checkpoint_path,
@@ -22,11 +21,12 @@ from .data import (
     PAD_TOKEN,
     training_data,
 )
+from .args import args
 from torch.cuda.amp import autocast, GradScaler
 from torch.nn import CrossEntropyLoss
 from collections import deque
 from typing import Dict, Optional, Literal
-
+from torch.nn.utils import clip_grad_norm
 def gradfilter_ma(
     m: nn.Module,
     grads: Optional[Dict[str, deque]] = None,
@@ -123,24 +123,20 @@ if __name__ == "__main__":
     )
 
     # Loss function and optimizer
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
     if os.path.exists(checkpoint_path):
         checkpoint = torch.load(checkpoint_path)
         model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if 'optimizer_state_dict' in checkpoint:
+            try:
+                model.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            except:
+                print("Optimizer state dict not found in checkpoint.")
         start_epoch = checkpoint['epoch'] + 1
         grads = checkpoint.get('grads', None)
         
         
-    scaler = GradScaler(enabled=use_amp)
-
     # Load checkpoint if it exists
     start_epoch = 0
-    parser = argparse.ArgumentParser(description="Train the model")
-    parser.add_argument(
-        "--wandb", action="store_true", help="Enable Weights & Biases logging"
-    )
-    args = parser.parse_args()
 
     criterion = CrossEntropyLoss(ignore_index=PAD_TOKEN)
     # Prepare data loaders
@@ -153,7 +149,11 @@ if __name__ == "__main__":
     )
     # Training loop
     num_epochs = 10000
-
+    model.train()
+    
+    # needed for schedule-free optimizer
+    model.optimizer.train()
+    
     if args.wandb:
         import wandb
         wandb.init(
@@ -170,18 +170,10 @@ if __name__ == "__main__":
             },
             resume="auto"
         )
-    if checkpoint_path.exists():
-        checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        start_epoch = checkpoint["epoch"] + 1
-        print(f"Resuming training from epoch {start_epoch}")
-
 
     for epoch in range(start_epoch, num_epochs):
-        model.train()
         total_loss = 0
-        optimizer.zero_grad()
+        model.optimizer.zero_grad()
 
         for batch_idx, (src, tgt, src_lengths, tgt_lengths) in enumerate(train_loader):
             src, tgt = src.to(device), tgt.to(device)
@@ -192,24 +184,28 @@ if __name__ == "__main__":
                     model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader
                 )
 
-            scaler.scale(loss).backward()
+            loss.backward()
             
-            grads = gradfilter_ma(model, grads=grads)
+            # fastgrok, ignored for now
+            # grads = gradfilter_ma(model, grads=grads)
+            
+            # Apply gradient clipping
+            # max_grad_norm = 1.0  # Adjust this value as needed
+            # clip_grad_norm(model.parameters(), max_grad_norm)
 
             if (batch_idx + 1) % accumulation_steps == 0:
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad()
+                model.optimizer.step()
+                model.optimizer.zero_grad()
+            
+            # compute total batches
+            print(f"Epoch {epoch+1}, Batch {batch_idx+1}, Loss: {loss.item():.4f}")
 
             total_loss += loss.item()
 
-            # print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
-
         # If there are any accumulation steps left, do a final step
         if (batch_idx + 1) % accumulation_steps != 0:
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
+            model.optimizer.step()
+            model.optimizer.zero_grad()
 
         avg_loss = total_loss / len(train_loader)
         print(f"Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}")
@@ -218,18 +214,15 @@ if __name__ == "__main__":
             {
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
+                "optimizer_state_dict": model.optimizer.state_dict(),
                 "loss": loss.item(),
-                "grads": grads,  # Add this line
+                "grads": grads,
             },
             checkpoint_path,
         )
 
         if args.wandb:
-            # Log epoch metrics to Wandb
             wandb.log({"epoch": epoch + 1, "avg_loss": avg_loss})
-
-            # Save model checkpoint to Wandb
             wandb.save(str(checkpoint_path))
 
     print("Training completed.")
