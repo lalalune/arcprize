@@ -11,7 +11,7 @@ from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
 # Model initialization tiny
 batch_size = 1
 if torch.cuda.is_available():
-    batch_size = 32
+    batch_size = 64
 d_model = 512 - NUM_ENCODING_DIMENSIONS
 nhead = 8
 num_layers = 12
@@ -39,7 +39,7 @@ class DecoderOnlyTransformer(nn.Module):
         self.nhead = nhead
         self.embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
         self.token_embedding = nn.Embedding(num_tokens, d_model, padding_idx=PAD_TOKEN)
-        self.position_encoder = PositionEncoder(30, 30)
+        self.position_encoder = PositionEncoder(30, 30, device=device)
 
         self.layers = nn.ModuleList(
             [

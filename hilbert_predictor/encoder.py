@@ -5,11 +5,13 @@ import math
 NUM_ENCODING_DIMENSIONS = 68
 
 class PositionEncoder(nn.Module):
-    def __init__(self, max_height, max_width):
+    def __init__(self, max_height, max_width, device):
         super().__init__()
         self.max_height = max_height
         self.max_width = max_width
         self.feature_dim = NUM_ENCODING_DIMENSIONS
+        self.device = device
+
 
     def compute_encodings(self, height, width):
         encodings = torch.zeros(height, width, self.feature_dim)
@@ -40,6 +42,7 @@ class PositionEncoder(nn.Module):
 
         return encodings
 
+
     def forward(self, x, dimensions):
         if x.dim() == 3:
             batch_size, seq_len, _ = x.shape
@@ -60,27 +63,31 @@ class PositionEncoder(nn.Module):
         # Truncate to match the sequence length
         repeated_encodings = repeated_encodings[:, :seq_len, :]
         
+        # Move the repeated_encodings to the same device as the input tensor x
+        repeated_encodings = repeated_encodings.to(x.device)
+        
         # Combine the original input with the position encodings
         return torch.cat([x, repeated_encodings], dim=-1)
 
 
 def test_position_encoder():
-    encoder = PositionEncoder(30, 30)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    encoder = PositionEncoder(30, 30, device)
     
     # Test 1x1
-    x = torch.zeros(1, 1, 1)  # Add an extra dimension for the embedding
+    x = torch.zeros(1, 1, 1, device=device)  # Add an extra dimension for the embedding
     dimensions = (1, 1)
     output = encoder(x, dimensions)
     assert output.shape == (1, 1, 69), f"Incorrect output shape for 1x1: {output.shape}"
 
     # Test 5x5
-    x = torch.zeros(1, 25, 1)  # Add an extra dimension for the embedding
+    x = torch.zeros(1, 25, 1, device=device)  # Add an extra dimension for the embedding
     dimensions = (5, 5)
     output = encoder(x, dimensions)
     assert output.shape == (1, 25, 69), f"Incorrect output shape for 5x5: {output.shape}"
 
     # Test 30x30
-    x = torch.zeros(1, 900, 1)  # Add an extra dimension for the embedding
+    x = torch.zeros(1, 900, 1, device=device)  # Add an extra dimension for the embedding
     dimensions = (30, 30)
     output = encoder(x, dimensions)
     assert output.shape == (1, 900, 69), f"Incorrect output shape for 30x30: {output.shape}"
@@ -89,4 +96,3 @@ def test_position_encoder():
 
 if __name__ == "__main__":
     test_position_encoder()
-    

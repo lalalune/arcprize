@@ -41,7 +41,7 @@ def gradfilter_ma(
 
     for n, p in m.named_parameters():
         if p.requires_grad and p.grad is not None:
-            grads[n].append(p.grad.data.detach()) # .cpu())
+            grads[n].append(p.grad.data.detach())
 
             # Modify the gradients.
             if not warmup or len(grads[n]) == window_size and not trigger:
@@ -132,8 +132,6 @@ if __name__ == "__main__":
         grads = checkpoint.get('grads', None)
         
         
-    scaler = GradScaler(enabled=use_amp)
-
     # Load checkpoint if it exists
     start_epoch = 0
     parser = argparse.ArgumentParser(description="Train the model")
@@ -192,23 +190,19 @@ if __name__ == "__main__":
                     model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader
                 )
 
-            scaler.scale(loss).backward()
+            loss.backward()
             
-            grads = gradfilter_ma(model, grads=grads)
+            # grads = gradfilter_ma(model, grads=grads)
 
             if (batch_idx + 1) % accumulation_steps == 0:
-                scaler.step(optimizer)
-                scaler.update()
+                optimizer.step()
                 optimizer.zero_grad()
 
             total_loss += loss.item()
 
-            # print(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}")
-
         # If there are any accumulation steps left, do a final step
         if (batch_idx + 1) % accumulation_steps != 0:
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
             optimizer.zero_grad()
 
         avg_loss = total_loss / len(train_loader)
@@ -220,16 +214,13 @@ if __name__ == "__main__":
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "loss": loss.item(),
-                "grads": grads,  # Add this line
+                "grads": grads,
             },
             checkpoint_path,
         )
 
         if args.wandb:
-            # Log epoch metrics to Wandb
             wandb.log({"epoch": epoch + 1, "avg_loss": avg_loss})
-
-            # Save model checkpoint to Wandb
             wandb.save(str(checkpoint_path))
 
     print("Training completed.")
