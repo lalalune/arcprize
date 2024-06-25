@@ -12,8 +12,8 @@ from schedulefree import AdamWScheduleFree
 
 d_model = 128 - NUM_ENCODING_DIMENSIONS
 nhead = 2
-num_layers = 6
-dim_feedforward = 512
+num_layers = 4
+dim_feedforward = 256
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class DecoderOnlyTransformer(nn.Module):

@@ -36,8 +36,9 @@ def eval(checkpoint_path, device):
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     # Load the model
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    if os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
     
     # needed for schedule free optimization

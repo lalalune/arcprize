@@ -94,7 +94,7 @@ def train_step(model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion,
 
     for t in range(seq_len):
         logits, confidences = model(input_token, dimensions)
-        logits, confidences = refine_predictions(model, input_token, logits, confidences, dimensions, threshold=0.5)
+        # logits, confidences = refine_predictions(model, input_token, logits, confidences, dimensions, threshold=0.5)
         
         outputs[:, t, :] = logits.squeeze(1)
 
