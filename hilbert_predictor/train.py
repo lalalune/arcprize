@@ -98,11 +98,14 @@ def train_step(
     tgt_lengths,
     dimensions,
     criterion,
-    confidence_values,  # Added parameter to collect confidence values
+    confidence_values,
     teacher_forcing_ratio=1.2,
 ):
     batch_size, seq_len = tgt.size()
     outputs = torch.zeros(batch_size, seq_len, NUM_TOKENS + 1, device=device)
+
+    first_pass_correct_total = 0
+    first_pass_total = 0
 
     # Find the first non-padding token
     first_non_pad = torch.where(
@@ -111,6 +114,12 @@ def train_step(
     input_token = src[torch.arange(src.size(0)), first_non_pad].unsqueeze(1)
     for t in range(seq_len - 1):
         logits, confidences = model(input_token, dimensions)
+        
+        # Accumulate first pass accuracy
+        _, first_pass_predictions = torch.max(logits, dim=-1)
+        first_pass_correct = (first_pass_predictions.squeeze(1) == tgt[:, t + 1]).sum().item()
+        first_pass_total += tgt[:, t + 1].size(0)
+        first_pass_correct_total += first_pass_correct
         
         # dynamic confidence thresholding
         # store average of the last 10 high confidence percentages
@@ -135,12 +144,14 @@ def train_step(
         global last_threshold
         last_threshold = threshold
         
+        # Refine predictions and collect confidence values
         logits, confidences, refined_tokens, high_confidence_percentage = (
             model.refine_predictions(
                 input_token, logits, confidences, dimensions, threshold=threshold
             )
         )
         confidence_history.append(high_confidence_percentage)
+        
 
         # Collect confidence values for later averaging
         confidence_values.append(high_confidence_percentage)
@@ -171,7 +182,12 @@ def train_step(
 
     last_loss = loss.item()
 
-    return outputs, loss
+    if first_pass_total > 0:
+        first_pass_accuracy = first_pass_correct_total / first_pass_total * 100
+    else:
+        first_pass_accuracy = 0.0
+    
+    return outputs, loss, first_pass_accuracy
 
 if __name__ == "__main__":
     start_epoch = 0
@@ -244,9 +260,10 @@ if __name__ == "__main__":
             src_lengths, tgt_lengths = src_lengths.to(device), tgt_lengths.to(device)
 
             with autocast(enabled=use_amp):
-                generated_ids, loss = train_step(
+                generated_ids, loss, first_pass_accuracy = train_step(
                     model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion, confidence_values
                 )
+
 
             loss.backward()
 
@@ -295,7 +312,7 @@ if __name__ == "__main__":
             )
             if confidence_values:  # Check to avoid division by zero
                 average_confidence = sum(confidence_values) / len(confidence_values)
-                print(f"Average High Confidence for Epoch {epoch+1}: {average_confidence:.2f}%")
+                print(f"Average High Confidence for Epoch {epoch+1}: {average_confidence:.2f}% - First pass accuracy: {first_pass_accuracy:.2f}%")
 
 
             total_loss += loss.item()

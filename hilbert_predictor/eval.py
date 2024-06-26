@@ -32,6 +32,8 @@ def eval(checkpoint_path, device):
     test_inputs = [item[0] for item in test_data]
     test_targets = [item[1] for item in test_data]
 
+    print(f"Loaded {len(test_data)} test examples")
+
     test_dataset = TensorDataset(
         torch.tensor(test_inputs, dtype=torch.long),
         torch.tensor(test_targets, dtype=torch.long),
@@ -56,6 +58,8 @@ def eval(checkpoint_path, device):
     total_non_zero_tokens = 0
     completely_correct = 0
     total_predictions = 0
+    
+    
 
     with torch.no_grad():
         for src, tgt, dimensions in test_loader:

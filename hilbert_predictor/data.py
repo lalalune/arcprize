@@ -39,7 +39,7 @@ MAX_SEQUENCE_LENGTH = MAX_CONTEXT_LENGTH + MAX_PREDICTION_LENGTH
 
 evaluating_data = None
 
-simple_dataset = "arc-datasets/datasets/bitdata/"
+simple_dataset = "arc-datasets/datasets/1D-ARC/"
 
 
 def pad_sequence(sequence, max_length, pad_value, left_pad=False):
@@ -126,7 +126,7 @@ def process_data(data_list):
     return processed_data
 
 
-def is_within_bounds(data, max_dim=9):
+def is_within_bounds(data, max_dim=12):
     """
     Check if any matrix in the train or test datasets exceeds the maximum dimensions.
     """
@@ -154,8 +154,8 @@ def load_and_process_training_data(file_paths):
 
 
 if kindergarten:
-    training_data_dir = simple_dataset + "training"
-    evaluating_data_dir = simple_dataset + "evaluation"
+    training_data_dir = simple_dataset + "./data/training"
+    evaluating_data_dir = simple_dataset + "./data/evaluation"
 
 else:
     # Rest of the code remains the same
@@ -167,6 +167,7 @@ training_file_paths = [
     for f in os.listdir(training_data_dir)
     if f.endswith(".json")
 ]
+print("training_file_paths", training_file_paths)
 evaluating_file_paths = [
     os.path.join(evaluating_data_dir, f)
     for f in os.listdir(evaluating_data_dir)
