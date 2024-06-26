@@ -33,14 +33,14 @@ class DecoderOnlyTransformer(nn.Module):
         self.device = device
         self.MAX_SEQUENCE_LENGTH = MAX_SEQUENCE_LENGTH
         self.d_model = d_model
+        self.d_model_with_pos = d_model + NUM_ENCODING_DIMENSIONS
         self.nhead = nhead
         self.embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
         self.token_embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
         self.position_encoder = PositionEncoder(5, 5, device=device)
-
         self.layers = nn.ModuleList(
             [
-                self.create_decoder_layer(d_model, nhead, dim_feedforward, dropout_rate)
+                self.create_decoder_layer(self.d_model_with_pos, nhead, dim_feedforward, dropout_rate)
                 for _ in range(num_layers)
             ]
         )
@@ -50,7 +50,7 @@ class DecoderOnlyTransformer(nn.Module):
         else:
             self.optimizer = torch.optim.Adam(self.parameters(), lr=0.0001)
 
-        self.fc_out = nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, num_tokens + 1)
+        self.fc_out = nn.Linear(self.d_model_with_pos, num_tokens + 1)
         self.to(device)
 
     def create_decoder_layer(self, d_model, nhead, dim_feedforward, dropout_rate):
@@ -58,21 +58,21 @@ class DecoderOnlyTransformer(nn.Module):
         return nn.ModuleDict(
             {
                 "self_attn": MultiHeadDispatch(
-                    dim_model=d_model + NUM_ENCODING_DIMENSIONS,
+                    dim_model=self.d_model_with_pos,
                     num_heads=nhead,
                     attention=attention,
                     bias=True,
                     residual_dropout=dropout_rate,
                 ),
                 "ff": nn.Sequential(
-                    nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, dim_feedforward),
+                    nn.Linear(self.d_model_with_pos, dim_feedforward),
                     nn.ReLU(),
                     nn.Dropout(dropout_rate),
-                    nn.Linear(dim_feedforward, d_model + NUM_ENCODING_DIMENSIONS),
+                    nn.Linear(dim_feedforward, self.d_model_with_pos),
                     nn.Dropout(dropout_rate),
                 ),
-                "norm1": nn.LayerNorm(d_model + NUM_ENCODING_DIMENSIONS),
-                "norm2": nn.LayerNorm(d_model + NUM_ENCODING_DIMENSIONS),
+                "norm1": nn.LayerNorm(self.d_model_with_pos),
+                "norm2": nn.LayerNorm(self.d_model_with_pos),
             }
         )
 
@@ -83,9 +83,12 @@ class DecoderOnlyTransformer(nn.Module):
         non_special_mask = ~(src >= 10) & (src <= 18)
         x_to_process = x * non_special_mask.unsqueeze(-1).float()
 
+        # Add position encodings
+        x_to_process = self.position_encoder(x_to_process, dimensions)
+
         # Process tokens through the model layers
         for i, layer in enumerate(self.layers):
-            q = k = v = self.position_encoder(x_to_process, dimensions)
+            q = k = v = x_to_process
             attn_output = layer['self_attn'](q, k, v)
             x_to_process = attn_output + x_to_process
             x_to_process = layer['norm1'](x_to_process)
@@ -93,7 +96,9 @@ class DecoderOnlyTransformer(nn.Module):
             x_to_process = layer['norm2'](ff_output + x_to_process)
 
         # Final output calculations
-        x = x_to_process + x * (~non_special_mask).unsqueeze(-1).float()
+        # Pad x to match x_to_process dimensions
+        x_padded = torch.cat([x, torch.zeros(*x.shape[:-1], NUM_ENCODING_DIMENSIONS, device=x.device)], dim=-1)
+        x = x_to_process + x_padded * (~non_special_mask).unsqueeze(-1).float()
         output = self.fc_out(x)
         confidences = torch.softmax(output, dim=-1)
 
