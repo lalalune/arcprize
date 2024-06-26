@@ -6,8 +6,12 @@ from torch.utils.data import DataLoader, TensorDataset
 from .args import checkpoint_path, use_schedulefree
 
 from .data import (
+    END_INPUT_MATRIX_TOKEN,
+    END_OUTPUT_MATRIX_TOKEN,
     MAX_CONTEXT_LENGTH,
     PAD_TOKEN,
+    START_INPUT_MATRIX_TOKEN,
+    START_OUTPUT_MATRIX_TOKEN,
     START_SEQUENCE_TOKEN,
     END_SEQUENCE_TOKEN,
     START_EXAMPLE_TOKEN,
@@ -87,6 +91,10 @@ def eval(checkpoint_path, device):
                 END_SEQUENCE_TOKEN,
                 START_EXAMPLE_TOKEN,
                 END_EXAMPLE_TOKEN,
+                START_INPUT_MATRIX_TOKEN,
+                END_INPUT_MATRIX_TOKEN,
+                START_OUTPUT_MATRIX_TOKEN,
+                END_OUTPUT_MATRIX_TOKEN
             ]
 
             def remove_special_tokens(seq):
@@ -121,6 +129,8 @@ def eval(checkpoint_path, device):
             input_seq = remove_special_tokens(src[0].cpu().tolist())
             predicted_seq = predicted_clean.cpu().numpy()
             target_seq = target_clean.cpu().numpy()
+            # filter token 16
+            target_seq = [x for x in target_seq if x != 16]
 
             is_completely_correct = np.array_equal(predicted_seq, target_seq)
             completely_correct += int(is_completely_correct)
