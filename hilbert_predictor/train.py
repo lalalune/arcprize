@@ -110,8 +110,8 @@ def train_step(
     for t in range(seq_len - 1):
         logits, confidences = model(input_token, dimensions)
         logits, confidences, refined_tokens, high_confidence_percentage = (
-            refine_predictions(
-                model, input_token, logits, confidences, dimensions, threshold=0.5
+            model.refine_predictions(
+                input_token, logits, confidences, dimensions, threshold=0.8
             )
         )
 
@@ -145,30 +145,6 @@ def train_step(
     last_loss = loss.item()
 
     return outputs, loss
-
-
-def refine_predictions(
-    model, src, initial_logits, confidences, dimensions, threshold=0.5
-):
-    _, initial_predictions = torch.max(initial_logits, dim=-1)
-    max_confidences, _ = torch.max(confidences, dim=-1)
-    low_confidence_mask = max_confidences < threshold
-
-    refined_src = src.clone()
-    refined_src[low_confidence_mask] = initial_predictions[low_confidence_mask]
-
-    # Calculate the percentage of high confidence predictions
-    high_confidence_percentage = (
-        max_confidences >= threshold
-    ).float().mean().item() * 100  # percentage
-
-    refined_logits, refined_confidences = model(refined_src, dimensions)
-    return (
-        refined_logits,
-        refined_confidences,
-        low_confidence_mask.sum().item(),
-        high_confidence_percentage,
-    )
 
 
 if __name__ == "__main__":

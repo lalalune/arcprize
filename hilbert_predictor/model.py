@@ -109,6 +109,27 @@ class Transformer(nn.Module):
         confidences = torch.softmax(output, dim=-1)
 
         return output, confidences
+    
+    def refine_predictions(self, src, initial_logits, confidences, dimensions, threshold=0.8):
+        _, initial_predictions = torch.max(initial_logits, dim=-1)
+        max_confidences, _ = torch.max(confidences, dim=-1)
+        low_confidence_mask = max_confidences < threshold
+
+        refined_src = src.clone()
+        refined_src[low_confidence_mask] = initial_predictions[low_confidence_mask]
+
+        # Calculate the percentage of high confidence predictions
+        high_confidence_percentage = (
+            max_confidences >= threshold
+        ).float().mean().item() * 100  # percentage
+
+        refined_logits, refined_confidences = self(refined_src, dimensions)
+        return (
+            refined_logits,
+            refined_confidences,
+            low_confidence_mask.sum().item(),
+            high_confidence_percentage,
+        )
 
 
 model = Transformer(

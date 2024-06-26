@@ -65,20 +65,20 @@ def eval(checkpoint_path, device):
             ]
 
             # Generate output sequence
-            output, _ = model(src, position_encoder_dimensions)
+            output, confidences = model(src, position_encoder_dimensions)
+            print("Output: ", output)
+            print("Confidences: ", confidences)
+            
+            # Perform refinement passes
+            num_refinement_passes = 2
+            for _ in range(num_refinement_passes):
+                output, confidences, _, _ = model.refine_predictions(src, output, confidences, position_encoder_dimensions)
 
             _, predicted = torch.max(output.data, -1)
 
-            # Find the end of the actual sequence (ignoring padding)
-            tgt_end_idx = (tgt == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[1][0]
-            pred_end_idx = (predicted == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[1]
-            pred_end_idx = (
-                pred_end_idx[0] if pred_end_idx.numel() > 0 else predicted.size(1)
-            )
 
-            # Extract the relevant parts of the sequences
-            predicted = predicted[:, :pred_end_idx]
-            target = tgt[:, :tgt_end_idx]
+            print("predicted before token removal:", predicted)
+            print("target before token removal:", tgt)
 
             # Remove special tokens
             special_tokens = [
@@ -93,7 +93,10 @@ def eval(checkpoint_path, device):
                 return [token for token in seq if token not in special_tokens]
 
             predicted_clean = remove_special_tokens(predicted[0].cpu().tolist())
-            target_clean = remove_special_tokens(target[0].cpu().tolist())
+            target_clean = remove_special_tokens(tgt[0].cpu().tolist())
+
+            print("predicted_clean:", predicted_clean)
+            print("target_clean:", target_clean)
 
             # Convert back to tensors
             predicted_clean = torch.tensor(predicted_clean, device=device)
