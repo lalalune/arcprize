@@ -2,7 +2,13 @@ import os
 import numpy
 import torch
 import torch.nn as nn
-import torch.optim as optim
+from torch.nn import CrossEntropyLoss
+from torch.cuda.amp import autocast
+from torch.nn.utils import clip_grad_norm
+
+from collections import deque
+from typing import Dict, Optional, Literal
+
 from torch.utils.data import DataLoader, TensorDataset
 from .model import (
     model,
@@ -13,7 +19,6 @@ from .model import (
     device,
 )
 from .args import checkpoint_path, dropout_rate, batch_size, use_schedulefree, use_grokfast, use_wandb
-
 from .data import (
     END_OUTPUT_MATRIX_TOKEN,
     NUM_TOKENS,
@@ -22,14 +27,9 @@ from .data import (
     MAX_PREDICTION_LENGTH,
     SPECIAL_TOKENS,
     training_data,
+    is_special_token,
+    SPECIAL_TOKENS
 )
-from torch.cuda.amp import autocast, GradScaler
-from torch.nn import CrossEntropyLoss
-from collections import deque
-from typing import Dict, Optional, Literal
-from torch.nn.utils import clip_grad_norm
-from .data import is_special_token, SPECIAL_TOKENS
-
 
 def gradfilter_ma(
     m: nn.Module,
@@ -87,7 +87,7 @@ def collate_fn(batch):
 
 
 last_loss = 0
-
+confidence_history = deque(maxlen=10)
 
 def train_step(
     model,
@@ -110,14 +110,39 @@ def train_step(
     input_token = src[torch.arange(src.size(0)), first_non_pad].unsqueeze(1)
     for t in range(seq_len - 1):
         logits, confidences = model(input_token, dimensions)
+        
+        # dynamic confidence thresholding
+        # store average of the last 10 high confidence percentages
+        if len(confidence_history) == 10:
+            avg_confidence = sum(confidence_history) / len(confidence_history)
+        else:
+            avg_confidence = 0.5  # Default value if not enough history
+        
+        min_threshold = 0.6
+        max_threshold = 0.99
+        min_confidence = 50
+        max_confidence = 90
+        
+        # Set threshold based on average confidence
+        if avg_confidence <= min_confidence:
+            threshold = min_threshold
+        elif avg_confidence >= max_confidence:
+            threshold = max_threshold
+        else:
+            threshold = min_threshold + (avg_confidence - min_confidence) * (max_threshold - min_threshold) / (max_confidence - min_confidence)
         logits, confidences, refined_tokens, high_confidence_percentage = (
             model.refine_predictions(
-                input_token, logits, confidences, dimensions, threshold=0.75
+                input_token, logits, confidences, dimensions, threshold=threshold
             )
         )
-        
+        confidence_history.append(high_confidence_percentage)
+
         # Collect confidence values for later averaging
         confidence_values.append(high_confidence_percentage)
+        
+
+
+
 
         outputs[:, t, :] = logits.squeeze(1)
 
