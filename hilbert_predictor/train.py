@@ -1,24 +1,27 @@
 import os
+import numpy
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from .model import (
     model,
-    checkpoint_path,
     d_model,
     nhead,
     num_layers,
     dim_feedforward,
-    MAX_CONTEXT_LENGTH,
-    MAX_PREDICTION_LENGTH,
-    dropout_rate,
     device,
     batch_size,
 )
+from .args import checkpoint_path, dropout_rate, batch_size, use_schedulefree
+
 from .data import (
+    END_OUTPUT_MATRIX_TOKEN,
     NUM_TOKENS,
     PAD_TOKEN,
+    MAX_CONTEXT_LENGTH,
+    MAX_PREDICTION_LENGTH,
+    SPECIAL_TOKENS,
     training_data,
 )
 from .args import args
@@ -27,6 +30,8 @@ from torch.nn import CrossEntropyLoss
 from collections import deque
 from typing import Dict, Optional, Literal
 from torch.nn.utils import clip_grad_norm
+from .data import is_special_token, SPECIAL_TOKENS
+
 def gradfilter_ma(
     m: nn.Module,
     grads: Optional[Dict[str, deque]] = None,
@@ -56,72 +61,94 @@ def gradfilter_ma(
     return grads
 
 def collate_fn(batch):
-    src_list, tgt_list = zip(*batch)
+    src_list, tgt_list, dimensions_list = zip(*batch)
+    # print(f"Batch dimensions: {dimensions_list}")
     src_padded = torch.nn.utils.rnn.pad_sequence(
-        [torch.tensor(src[:MAX_CONTEXT_LENGTH], dtype=torch.long) for src in src_list],
+        [src[:MAX_CONTEXT_LENGTH] for src in src_list],
         batch_first=True,
         padding_value=PAD_TOKEN,
     )
     tgt_padded = torch.nn.utils.rnn.pad_sequence(
         [
-            torch.tensor(tgt[:MAX_PREDICTION_LENGTH], dtype=torch.long)
+            tgt[:MAX_PREDICTION_LENGTH]
             for tgt in tgt_list
         ],
         batch_first=True,
         padding_value=PAD_TOKEN,
     )
-    src_lengths = torch.LongTensor(
+    src_lengths = torch.IntTensor(
         [min(len(src), MAX_CONTEXT_LENGTH) for src in src_list]
     )
-    tgt_lengths = torch.LongTensor(
+    tgt_lengths = torch.IntTensor(
         [min(len(tgt), MAX_PREDICTION_LENGTH) for tgt in tgt_list]
     )
-    return src_padded, tgt_padded, src_lengths, tgt_lengths
+    return src_padded, tgt_padded, src_lengths, tgt_lengths, dimensions_list
+
+last_loss = 0
+def train_step(model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion, teacher_forcing_ratio=1.2):
+    batch_size, seq_len = tgt.size()
+    outputs = torch.zeros(batch_size, seq_len, NUM_TOKENS + 1, device=device)
+
+    # Find the first non-padding token
+    first_non_pad = torch.where(src != PAD_TOKEN, src, src.new_tensor([src.shape[1]])).min(dim=1)[1]
+    input_token = src[torch.arange(src.size(0)), first_non_pad].unsqueeze(1)
+    for t in range(seq_len - 1):
+        logits, confidences = model(input_token, dimensions)
+        logits, confidences, refined_tokens, high_confidence_percentage = refine_predictions(
+            model, input_token, logits, confidences, dimensions, threshold=0.5
+        )
+
+        outputs[:, t, :] = logits.squeeze(1)
+
+        # if loss is less than one, increase techer forcing ratio
+        global last_loss
+
+        teacher_forcing = torch.rand(1).item() < teacher_forcing_ratio - (1.0 - last_loss)
+        
+        if teacher_forcing:
+            next_input = tgt[:, t+1].unsqueeze(1)
+        else:
+            next_input = logits.argmax(-1)
+            if next_input.dim() == 1:
+                next_input = next_input.unsqueeze(1)
+            elif next_input.dim() == 3:
+                next_input = next_input.squeeze(1)
+                
+        special_mask = is_special_token(tgt[:, t+1].unsqueeze(1), SPECIAL_TOKENS)
+        input_token = torch.where(special_mask, tgt[:, t+1].unsqueeze(1), next_input)
 
 
-def train_step(
-    model,
-    src,
-    tgt,
-    src_lengths,
-    tgt_lengths,
-    criterion,
-    train_loader,
-    teacher_forcing_ratio=1.0,
-):
-    with autocast(enabled=use_amp):
-        dimensions = src.size(0), src.size(1)  # Pass the dimensions of the input
-        logits = model(src, dimensions)  # Pass dimensions to the model
+    # Exclude special tokens from loss computation
+    loss_mask = ~is_special_token(tgt, SPECIAL_TOKENS)
+    loss = criterion(outputs[loss_mask].view(-1, NUM_TOKENS + 1), tgt[loss_mask].view(-1))
 
-        logits = logits[
-            :, : tgt.size(1), :
-        ]  # Ensure logits are the same length as targets
+    last_loss = loss.item()
 
-        # Flatten for cross-entropy loss
-        logits = logits.reshape(
-            -1, NUM_TOKENS + 1
-        )  # Reshape to [batch_size * sequence_length, NUM_TOKENS + 1]
-        tgt = tgt.view(-1)  # Flatten target
+    return outputs, loss
 
-        # Calculate loss
-        loss = criterion(logits, tgt)
 
-    return logits, loss
+
+def refine_predictions(model, src, initial_logits, confidences, dimensions, threshold=0.5):
+    _, initial_predictions = torch.max(initial_logits, dim=-1)
+    max_confidences, _ = torch.max(confidences, dim=-1)
+    low_confidence_mask = max_confidences < threshold
+
+    refined_src = src.clone()
+    refined_src[low_confidence_mask] = initial_predictions[low_confidence_mask]
+    
+    # Calculate the percentage of high confidence predictions
+    high_confidence_percentage = (max_confidences >= threshold).float().mean().item() * 100  # percentage
+
+    refined_logits, refined_confidences = model(refined_src, dimensions)
+    return refined_logits, refined_confidences, low_confidence_mask.sum().item(), high_confidence_percentage
+
 
 
 if __name__ == "__main__":
     start_epoch = 0
     grads = None
-    accumulation_steps = 16  # Accumulate gradients over 16 batches
-    use_amp = True  # Use Automatic Mixed Precision
+    use_amp = False  # Use Automatic Mixed Precision
     print("Training the model.")
-    print("training_data", training_data[0])
-    # Prepare data loaders
-    train_dataset = TensorDataset(
-        torch.tensor([x[0] for x in training_data], dtype=torch.long),
-        torch.tensor([x[1] for x in training_data], dtype=torch.long),
-    )
-
     # Loss function and optimizer
     if os.path.exists(checkpoint_path):
         checkpoint = torch.load(checkpoint_path)
@@ -139,20 +166,24 @@ if __name__ == "__main__":
     start_epoch = 0
 
     criterion = CrossEntropyLoss(ignore_index=PAD_TOKEN)
+
     # Prepare data loaders
     train_dataset = TensorDataset(
-        torch.tensor([x[0] for x in training_data], dtype=torch.long),
-        torch.tensor([x[1] for x in training_data], dtype=torch.long),
+        torch.tensor(numpy.array([x[0] for x in training_data]), dtype=torch.long),
+        torch.tensor(numpy.array([x[1] for x in training_data]), dtype=torch.long),
+        torch.tensor(numpy.array([x[2] for x in training_data]), dtype=torch.long),  # Dimensions
     )
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
+
     # Training loop
     num_epochs = 10000
     model.train()
     
-    # needed for schedule-free optimizer
-    model.optimizer.train()
+    # Needed for schedule-free optimizer
+    if use_schedulefree:
+        model.optimizer.train()
     
     if args.wandb:
         import wandb
@@ -161,7 +192,6 @@ if __name__ == "__main__":
             config={
                 "num_epochs": num_epochs,
                 "batch_size": batch_size,
-                "accumulation_steps": accumulation_steps,
                 "d_model": d_model,
                 "nhead": nhead,
                 "num_layers": num_layers,
@@ -175,37 +205,60 @@ if __name__ == "__main__":
         total_loss = 0
         model.optimizer.zero_grad()
 
-        for batch_idx, (src, tgt, src_lengths, tgt_lengths) in enumerate(train_loader):
+        for batch_idx, (src, tgt, src_lengths, tgt_lengths, dimensions) in enumerate(train_loader):
             src, tgt = src.to(device), tgt.to(device)
             src_lengths, tgt_lengths = src_lengths.to(device), tgt_lengths.to(device)
 
             with autocast(enabled=use_amp):
                 generated_ids, loss = train_step(
-                    model, src, tgt, src_lengths, tgt_lengths, criterion, train_loader
+                    model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion
                 )
 
             loss.backward()
             
             # fastgrok, ignored for now
-            # grads = gradfilter_ma(model, grads=grads)
+            grads = gradfilter_ma(model, grads=grads)
             
             # Apply gradient clipping
-            # max_grad_norm = 1.0  # Adjust this value as needed
-            # clip_grad_norm(model.parameters(), max_grad_norm)
+            max_grad_norm = 1.0  # Adjust this value as needed
+            clip_grad_norm(model.parameters(), max_grad_norm)
 
-            if (batch_idx + 1) % accumulation_steps == 0:
-                model.optimizer.step()
-                model.optimizer.zero_grad()
-            
-            # compute total batches
-            print(f"Epoch {epoch+1}, Batch {batch_idx+1}, Loss: {loss.item():.4f}")
-
-            total_loss += loss.item()
-
-        # If there are any accumulation steps left, do a final step
-        if (batch_idx + 1) % accumulation_steps != 0:
             model.optimizer.step()
             model.optimizer.zero_grad()
+            
+            if batch_idx % 100 == 0:
+                # run a prediction, print the tokens, expected tokens and accuracy
+                _, predictions = torch.max(generated_ids, dim=-1)
+                
+                # find the END_SEQUENCE_TOKEN
+                end_sequence_token = torch.where(tgt == END_OUTPUT_MATRIX_TOKEN)[1]
+
+                # trim the tgt tensor to the first END_SEQUENCE_TOKEN
+                if len(end_sequence_token) > 0:
+                    tgt_clipped = tgt[0, :end_sequence_token[0]]
+                else:
+                    tgt_clipped = tgt[0, :]
+                
+                # Clip predictions to match tgt_clipped length
+                predictions_clipped = predictions[0, :len(tgt_clipped)]
+                
+                total = len(tgt_clipped)
+                if total > 0:
+                    correct = (predictions_clipped == tgt_clipped).sum().item()
+                    accuracy = correct / total
+                    print(f"Accuracy: {accuracy:.4f}")
+                else:
+                    print("No valid target tokens found for accuracy calculation.")
+
+                print("Input: ", src[0, :].tolist())
+                print("Predictions (clipped): ", predictions_clipped.tolist())
+                print("Expected: ", tgt_clipped.tolist())
+                print(f"Correct predictions: {correct} out of {total}")
+            
+            # Compute total batches
+            print(f"Epoch {epoch+1}, Batch {batch_idx+1}, Loss: {loss.item():.4f} - Loss for first token: {criterion(generated_ids[:, 0, :], tgt[:, 0])}")
+
+            total_loss += loss.item()
 
         avg_loss = total_loss / len(train_loader)
         print(f"Epoch {epoch+1} completed. Average Loss: {avg_loss:.4f}")

@@ -1,25 +1,21 @@
 import torch
 import torch.nn as nn
-import math
-from pathlib import Path
 from xformers.components import MultiHeadDispatch
 from xformers.components.attention import ScaledDotProduct
-from .data import NUM_TOKENS, PAD_TOKEN, MAX_CONTEXT_LENGTH, MAX_SEQUENCE_LENGTH, MAX_PREDICTION_LENGTH
 from torch.utils.checkpoint import checkpoint
+
+from .data import MAX_CONTEXT_LENGTH, NUM_TOKENS, PAD_TOKEN, MAX_SEQUENCE_LENGTH
 from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
+from .args import dropout_rate, batch_size, use_schedulefree
+from .data import is_special_token, SPECIAL_TOKENS
+
 from schedulefree import AdamWScheduleFree
 
-# Model initialization tiny
-batch_size = 1
-if torch.cuda.is_available():
-    batch_size = 2048
 d_model = 128 - NUM_ENCODING_DIMENSIONS
-nhead = 8
-num_layers = 12
-dim_feedforward = 1024
-dropout_rate = 0.1
+nhead = 1
+num_layers = 4
+dim_feedforward = 256
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-checkpoint_path = Path("checkpoint.pt")
 
 class DecoderOnlyTransformer(nn.Module):
     def __init__(
@@ -37,21 +33,24 @@ class DecoderOnlyTransformer(nn.Module):
         self.device = device
         self.MAX_SEQUENCE_LENGTH = MAX_SEQUENCE_LENGTH
         self.d_model = d_model
+        self.d_model_with_pos = d_model + NUM_ENCODING_DIMENSIONS
         self.nhead = nhead
         self.embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
-        self.token_embedding = nn.Embedding(num_tokens, d_model, padding_idx=PAD_TOKEN)
-        self.position_encoder = PositionEncoder(30, 30, device=device)
-
+        self.token_embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
+        self.position_encoder = PositionEncoder(5, 5, device=device)
         self.layers = nn.ModuleList(
             [
-                self.create_decoder_layer(d_model, nhead, dim_feedforward, dropout_rate)
+                self.create_decoder_layer(self.d_model_with_pos, nhead, dim_feedforward, dropout_rate)
                 for _ in range(num_layers)
             ]
         )
-        self.optimizer = AdamWScheduleFree(self.parameters(), lr=0.01)
-        # self.optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
+        
+        if use_schedulefree:
+            self.optimizer = AdamWScheduleFree(self.parameters(), lr=0.001)
+        else:
+            self.optimizer = torch.optim.Adam(self.parameters(), lr=0.0001)
 
-        self.fc_out = nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, num_tokens + 1)
+        self.fc_out = nn.Linear(self.d_model_with_pos, num_tokens + 1)
         self.to(device)
 
     def create_decoder_layer(self, d_model, nhead, dim_feedforward, dropout_rate):
@@ -59,98 +58,51 @@ class DecoderOnlyTransformer(nn.Module):
         return nn.ModuleDict(
             {
                 "self_attn": MultiHeadDispatch(
-                    dim_model=d_model + NUM_ENCODING_DIMENSIONS,
+                    dim_model=self.d_model_with_pos,
                     num_heads=nhead,
                     attention=attention,
                     bias=True,
                     residual_dropout=dropout_rate,
                 ),
                 "ff": nn.Sequential(
-                    nn.Linear(d_model + NUM_ENCODING_DIMENSIONS, dim_feedforward),
+                    nn.Linear(self.d_model_with_pos, dim_feedforward),
                     nn.ReLU(),
                     nn.Dropout(dropout_rate),
-                    nn.Linear(dim_feedforward, d_model + NUM_ENCODING_DIMENSIONS),
+                    nn.Linear(dim_feedforward, self.d_model_with_pos),
                     nn.Dropout(dropout_rate),
                 ),
-                "norm1": nn.LayerNorm(d_model + NUM_ENCODING_DIMENSIONS),
-                "norm2": nn.LayerNorm(d_model + NUM_ENCODING_DIMENSIONS),
+                "norm1": nn.LayerNorm(self.d_model_with_pos),
+                "norm2": nn.LayerNorm(self.d_model_with_pos),
             }
         )
 
     def forward(self, src, dimensions):
-        assert src.dim() == 2, f"Expected input to be 2D, but got {src.dim()}D"
-        assert isinstance(dimensions, tuple), f"Expected dimensions to be a tuple, but got {type(dimensions)}"
-        assert len(dimensions) == 2, f"Expected dimensions to have length 2, but got {len(dimensions)}"
+        x = self.token_embedding(src)  # Embed all tokens
 
-        x = self.token_embedding(src)
-        assert x.shape == (
-            src.shape[0],
-            src.shape[1],
-            self.d_model,
-        ), f"Expected shape {(src.shape[0], src.shape[1], self.d_model)}, but got {x.shape}"
+        # Generate a mask for non-special tokens
+        non_special_mask = ~(src >= 10) & (src <= 18)
+        x_to_process = x * non_special_mask.unsqueeze(-1).float()
 
         # Add position encodings
-        x = self.position_encoder(x, dimensions)
+        x_to_process = self.position_encoder(x_to_process, dimensions)
 
-        batch_size, seq_len, _ = x.shape
-
+        # Process tokens through the model layers
         for i, layer in enumerate(self.layers):
-            q, k, v = x, x, x
+            q = k = v = x_to_process
+            attn_output = layer['self_attn'](q, k, v)
+            x_to_process = attn_output + x_to_process
+            x_to_process = layer['norm1'](x_to_process)
+            ff_output = layer['ff'](x_to_process)
+            x_to_process = layer['norm2'](ff_output + x_to_process)
 
-            q = q.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
-            k = k.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
-            v = v.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
-
-            assert (
-                q.shape
-                == k.shape
-                == v.shape
-                == (seq_len, batch_size, self.nhead, (self.d_model + NUM_ENCODING_DIMENSIONS) // self.nhead)
-            ), f"Expected shape {(seq_len, batch_size, self.nhead, (self.d_model + NUM_ENCODING_DIMENSIONS) // self.nhead)}, but got q: {q.shape}, k: {k.shape}, v: {v.shape}"
-
-            q = q.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
-            k = k.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
-            v = v.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
-
-            attn_output = checkpoint(layer["self_attn"], q, k, v)
-
-            assert attn_output.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {attn_output.shape}"
-
-            x = layer["norm1"](x + attn_output)
-            assert x.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {x.shape}"
-
-            ff_output = checkpoint(layer["ff"], x)
-
-            assert ff_output.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {ff_output.shape}"
-
-            x = layer["norm2"](x + ff_output)
-            assert x.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {x.shape}"
-
+        # Final output calculations
+        # Pad x to match x_to_process dimensions
+        x_padded = torch.cat([x, torch.zeros(*x.shape[:-1], NUM_ENCODING_DIMENSIONS, device=x.device)], dim=-1)
+        x = x_to_process + x_padded * (~non_special_mask).unsqueeze(-1).float()
         output = self.fc_out(x)
-        assert output.shape == (
-            batch_size,
-            seq_len,
-            NUM_TOKENS + 1,
-        ), f"Expected shape {(batch_size, seq_len, NUM_TOKENS + 1)}, but got {output.shape}"
+        confidences = torch.softmax(output, dim=-1)
 
-        return output
-
+        return output, confidences
 
 model = DecoderOnlyTransformer(
     NUM_TOKENS,
@@ -166,24 +118,26 @@ model = DecoderOnlyTransformer(
 
 def test_model_with_zeros():
     # Create dummy input data (zeros)
-    dummy_input = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(device)
+    dummy_input = torch.full((batch_size, MAX_SEQUENCE_LENGTH), PAD_TOKEN, dtype=torch.long).to(device)
+    dummy_input[:, :MAX_CONTEXT_LENGTH] = torch.randint(0, NUM_TOKENS, (batch_size, MAX_CONTEXT_LENGTH), device=device)
 
     # Create dummy dimensions
-    dummy_dimensions = (10, 10)  # Example dimensions
+    dummy_dimensions = [[MAX_CONTEXT_LENGTH // 5, MAX_CONTEXT_LENGTH // 5]]  # Example dimensions
 
     # Set the model to training mode
     model.train()
 
     # Create a dummy target (zeros)
-    dummy_target = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(
+    dummy_target = torch.full((batch_size, MAX_SEQUENCE_LENGTH), PAD_TOKEN, dtype=torch.long).to(
         device
     )
+    dummy_target[:, :MAX_CONTEXT_LENGTH] = torch.randint(0, NUM_TOKENS, (batch_size, MAX_CONTEXT_LENGTH), device=device)
 
     # Define loss function
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
 
     # Perform a forward pass
-    output = model(dummy_input, dummy_dimensions)
+    output, _ = model(dummy_input, dummy_dimensions)
 
     # Calculate loss
     loss = criterion(output.view(-1, NUM_TOKENS + 1), dummy_target.view(-1))
@@ -196,15 +150,17 @@ def test_model_with_zeros():
     print(f"Test completed. Loss: {loss.item()}")
 
 
+
 def test_position_encodings():
     # Create dummy input data (zeros)
     dummy_input = torch.zeros((batch_size, MAX_SEQUENCE_LENGTH), dtype=torch.long).to(device)
+    dummy_input[:, :MAX_CONTEXT_LENGTH] = torch.randint(0, NUM_TOKENS, (batch_size, MAX_CONTEXT_LENGTH), device=device)
 
     # Create dummy dimensions
-    dummy_dimensions = (10, 10)  # Example dimensions
+    dummy_dimensions = [[MAX_CONTEXT_LENGTH // 5, MAX_CONTEXT_LENGTH // 5]]  # Example dimensions
 
     # Perform a forward pass
-    output = model(dummy_input, dummy_dimensions)
+    output, _ = model(dummy_input, dummy_dimensions)
 
     # Check if the output has the correct shape
     assert output.shape == (
@@ -214,7 +170,7 @@ def test_position_encodings():
     ), f"Expected shape {(batch_size, MAX_SEQUENCE_LENGTH, NUM_TOKENS + 1)}, but got {output.shape}"
 
     # Check if the position encodings are not all zeros
-    assert not torch.allclose(output[:, :, :-1], torch.zeros_like(output[:, :, :-1])), "Position encodings are all zeros"
+    assert not torch.allclose(output[:, :MAX_CONTEXT_LENGTH, :-1], torch.zeros_like(output[:, :MAX_CONTEXT_LENGTH, :-1])), "Position encodings are all zeros"
 
     print("Position encodings test passed.")
 

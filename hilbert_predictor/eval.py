@@ -1,31 +1,30 @@
-from matplotlib import pyplot as plt
-
 import os
-import csv
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
+from .args import checkpoint_path, use_schedulefree
+
 from .data import (
+    MAX_CONTEXT_LENGTH,
     PAD_TOKEN,
     START_SEQUENCE_TOKEN,
     END_SEQUENCE_TOKEN,
     START_EXAMPLE_TOKEN,
     END_EXAMPLE_TOKEN,
-    evaluating_file_paths,
-    unflatten_1d_to_2d,
-    gilbert2d
 )
-from .model import model, checkpoint_path, device
+from .gilbert2d import gilbert2d
+from .model import model, device
+from .args import checkpoint_path, args
 
-# import wandb
-
-
-def eval(checkpoint_path, device, filenames):
+def eval(checkpoint_path, device):
 
     # Load the test data
     # wandb.init(project="hilbert_predictor", job_type="eval")
-    test_data = np.load("processed_evaluating_data.pkl", allow_pickle=True)
+    if args.simple:
+        test_data = np.load("processed_evaluating_data_simple.pkl", allow_pickle=True)
+    else:
+        test_data = np.load("processed_evaluating_data.pkl", allow_pickle=True)
     test_inputs = [item[0] for item in test_data]
     test_targets = [item[1] for item in test_data]
 
@@ -37,12 +36,13 @@ def eval(checkpoint_path, device, filenames):
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     # Load the model
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    if os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
-    
-    # needed for schedule free optimization
-    model.optimizer.eval()
+    if use_schedulefree:
+        # needed for schedule free optimization
+        model.optimizer.eval()
 
     os.makedirs("prediction_plots", exist_ok=True)
 
@@ -55,15 +55,18 @@ def eval(checkpoint_path, device, filenames):
 
     with torch.no_grad():
         for (src, tgt, dimensions) in test_loader:
-            src, tgt, dimensions = src.to(device), tgt.to(device), dimensions.to(device)
-            # Get the dims for Hilbert-aware position encoding
-            dimensions = tuple(dimensions.tolist()[0])
+            src, tgt = src.to(device), tgt.to(device)
+            # Get the height and width from dimensions
+            height, width = dimensions[0].tolist()
 
-            print("dimensions")
-            print(dimensions)
+            # Create the appropriate dimensions for the PositionEncoder
+            position_encoder_dimensions = [[MAX_CONTEXT_LENGTH // height, MAX_CONTEXT_LENGTH // width]]
+
             # Generate output sequence
-            output = model(src, dimensions)
+            output, _ = model(src, position_encoder_dimensions)
+
             _, predicted = torch.max(output.data, -1)
+
 
             # Find the end of the actual sequence (ignoring padding)
             tgt_end_idx = (tgt == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[1][0]
@@ -164,19 +167,4 @@ def eval(checkpoint_path, device, filenames):
     #     "completely_correct_percentage": completely_correct_percentage,
     # })
 
-
-# Update the unflatten_1d_to_2d function in gilbert2d.py:
-def unflatten_1d_to_2d(array_1d, width, height):
-    array_2d = np.full((height, width), PAD_TOKEN)  # Fill with padding value
-    for idx, (x, y) in enumerate(gilbert2d(width, height)):
-        if idx < len(array_1d):
-            array_2d[y][x] = array_1d[idx]
-        else:
-            break
-    return array_2d
-
-
-# get the filename from the path without the extension
-filenames = [os.path.splitext(os.path.basename(f))[0] for f in evaluating_file_paths]
-
-eval(checkpoint_path, device, filenames)
+eval(checkpoint_path, device)
