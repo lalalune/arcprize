@@ -4,6 +4,7 @@ import numpy as np
 import os
 import json
 import random
+import torch
 
 from .gilbert2d import flatten_2d_to_1d, unflatten_1d_to_2d
 from .args import args
@@ -18,8 +19,13 @@ START_OUTPUT_MATRIX_TOKEN = 15
 END_OUTPUT_MATRIX_TOKEN = 16
 START_SEQUENCE_TOKEN = 17
 END_SEQUENCE_TOKEN = 18
-MASK = 19
 NUM_TOKENS = END_SEQUENCE_TOKEN + 1
+
+SPECIAL_TOKENS = set(range(PAD_TOKEN, NUM_TOKENS))
+
+def is_special_token(tensor, special_tokens):
+    # Create a mask that is True where the tensor element is in special_tokens
+    return torch.stack([tensor == tok for tok in special_tokens]).any(dim=0)
 
 if args.simple:
     MAX_CONTEXT_LENGTH = 256

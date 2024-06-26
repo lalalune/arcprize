@@ -111,6 +111,8 @@ class PositionEncoder(nn.Module):
             repeated_encodings = flattened_encodings.unsqueeze(0).repeat(batch_size, 1, 1)
             repeated_encodings = repeated_encodings[:, :seq_len, :]
 
+        print("position embedding for first token: ", repeated_encodings[0, 0, :])
+        
         repeated_encodings = repeated_encodings.to(x.device)
         return torch.cat([x, repeated_encodings], dim=-1)
 

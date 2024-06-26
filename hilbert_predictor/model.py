@@ -7,6 +7,7 @@ from torch.utils.checkpoint import checkpoint
 from .data import MAX_CONTEXT_LENGTH, NUM_TOKENS, PAD_TOKEN, MAX_SEQUENCE_LENGTH
 from .encoder import PositionEncoder, NUM_ENCODING_DIMENSIONS
 from .args import dropout_rate, batch_size, use_schedulefree
+from .data import is_special_token, SPECIAL_TOKENS
 
 from schedulefree import AdamWScheduleFree
 
@@ -34,7 +35,7 @@ class DecoderOnlyTransformer(nn.Module):
         self.d_model = d_model
         self.nhead = nhead
         self.embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
-        self.token_embedding = nn.Embedding(num_tokens, d_model, padding_idx=PAD_TOKEN)
+        self.token_embedding = nn.Embedding(num_tokens + 1, d_model, padding_idx=PAD_TOKEN)
         self.position_encoder = PositionEncoder(5, 5, device=device)
 
         self.layers = nn.ModuleList(
@@ -76,92 +77,27 @@ class DecoderOnlyTransformer(nn.Module):
         )
 
     def forward(self, src, dimensions):
-        # print(f"DecoderOnlyTransformer - input shape: {src.shape}")
-        # print(f"DecoderOnlyTransformer - dimensions: {dimensions}")
-        # print(f"DecoderOnlyTransformer - height: {height}, width: {width}")
-        
-        # Clamp the input values to be within the valid range
-        src = torch.clamp(src, 0, self.token_embedding.num_embeddings - 1)
-        
-        # Reshape src if it's 4D
-        if src.dim() == 4:
-            src = src.squeeze(2)
-        elif src.dim() == 3:
-            src = src.squeeze(1)
-        
-        x = self.token_embedding(src)
-        
-        # print(f"DecoderOnlyTransformer - x shape after token embedding: {x.shape}")
-        # print(f"DecoderOnlyTransformer - x values after token embedding: {x}")
-        
-        # Adjust the assertion to allow for flexible batch size and sequence length
-        assert x.shape[-1] == self.d_model, f"Expected last dimension to be {self.d_model}, but got {x.shape[-1]}"
+        x = self.token_embedding(src)  # Embed all tokens
 
-        # Add position encodings
-        x = self.position_encoder(x, dimensions)
+        # Generate a mask for non-special tokens
+        non_special_mask = ~(src >= 10) & (src <= 18)
+        x_to_process = x * non_special_mask.unsqueeze(-1).float()
 
-        # print(f"DecoderOnlyTransformer - x shape after position encoding: {x.shape}")
-
-        batch_size, seq_len, _ = x.shape
-
+        # Process tokens through the model layers
         for i, layer in enumerate(self.layers):
-            q, k, v = x, x, x
+            q = k = v = self.position_encoder(x_to_process, dimensions)
+            attn_output = layer['self_attn'](q, k, v)
+            x_to_process = attn_output + x_to_process
+            x_to_process = layer['norm1'](x_to_process)
+            ff_output = layer['ff'](x_to_process)
+            x_to_process = layer['norm2'](ff_output + x_to_process)
 
-            q = q.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
-            k = k.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
-            v = v.view(batch_size, seq_len, self.nhead, -1).permute(1, 0, 2, 3)
-
-            assert (
-                q.shape
-                == k.shape
-                == v.shape
-                == (seq_len, batch_size, self.nhead, (self.d_model + NUM_ENCODING_DIMENSIONS) // self.nhead)
-            ), f"Expected shape {(seq_len, batch_size, self.nhead, (self.d_model + NUM_ENCODING_DIMENSIONS) // self.nhead)}, but got q: {q.shape}, k: {k.shape}, v: {v.shape}"
-
-            q = q.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
-            k = k.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
-            v = v.permute(1, 0, 2, 3).contiguous().view(batch_size, seq_len, -1)
-
-            attn_output = checkpoint(layer["self_attn"], q, k, v)
-
-            assert attn_output.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {attn_output.shape}"
-
-            x = layer["norm1"](x + attn_output)
-            assert x.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {x.shape}"
-
-            ff_output = checkpoint(layer["ff"], x)
-
-            assert ff_output.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {ff_output.shape}"
-
-            x = layer["norm2"](x + ff_output)
-            assert x.shape == (
-                batch_size,
-                seq_len,
-                self.d_model + NUM_ENCODING_DIMENSIONS,
-            ), f"Expected shape {(batch_size, seq_len, self.d_model + NUM_ENCODING_DIMENSIONS)}, but got {x.shape}"
-
+        # Final output calculations
+        x = x_to_process + x * (~non_special_mask).unsqueeze(-1).float()
         output = self.fc_out(x)
-        assert output.shape == (
-            batch_size,
-            seq_len,
-            NUM_TOKENS + 1,
-        ), f"Expected shape {(batch_size, seq_len, NUM_TOKENS + 1)}, but got {output.shape}"
-
         confidences = torch.softmax(output, dim=-1)
-        return output, confidences
 
+        return output, confidences
 
 model = DecoderOnlyTransformer(
     NUM_TOKENS,
