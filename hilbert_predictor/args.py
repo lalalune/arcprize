@@ -66,7 +66,7 @@ else:
         "wandb": False,
         "batch_size": 4,
         "dropout_rate": 0.1,
-        "checkpoint_path": Path("checkpoint.pt"),
+        "checkpoint_path": "checkpoint.pt",
         "hilbert": True,
         "quadtree": True,
         "schedulefree": False,
@@ -77,7 +77,7 @@ use_wandb = args.get('wandb', False)
 kindergarten = args.get('kindergarten', True)
 batch_size = args.get('batch_size', 4)
 dropout_rate = args.get('dropout_rate', 0.1)
-checkpoint_path = args.get('checkpoint_path, Path("checkpoint.pt")')
+checkpoint_path = args.get("checkpoint_path", "checkpoint.pt")
 use_hilbert = args.get('hilbert', False)
 use_quadtree = args.get('quadtree', False)
 use_schedulefree = args.get('schedulefree', False)
