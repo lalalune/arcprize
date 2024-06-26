@@ -119,9 +119,9 @@ def train_step(
         else:
             avg_confidence = 0.5  # Default value if not enough history
         
-        min_threshold = 0.6
-        max_threshold = 0.999
-        min_confidence = 50
+        min_threshold = 0.5 # its a good guess
+        max_threshold = 0.998 # better be damn sure
+        min_confidence = 40
         max_confidence = 90
         
         # Set threshold based on average confidence
