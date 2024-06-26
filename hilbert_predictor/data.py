@@ -98,9 +98,10 @@ def process_data(data_list):
                 [START_EXAMPLE_TOKEN, START_INPUT_MATRIX_TOKEN]
                 + test_input_flat
                 + [END_INPUT_MATRIX_TOKEN]
+                + [START_OUTPUT_MATRIX_TOKEN]
             )
 
-            target = [START_OUTPUT_MATRIX_TOKEN] + test_output_flat + [
+            target = test_output_flat + [
                 END_OUTPUT_MATRIX_TOKEN,
                 END_EXAMPLE_TOKEN,
                 END_SEQUENCE_TOKEN,
