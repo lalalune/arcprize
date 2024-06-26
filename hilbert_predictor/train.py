@@ -94,9 +94,9 @@ def train_step(model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion,
     input_token = src[torch.arange(src.size(0)), first_non_pad].unsqueeze(1)
     for t in range(seq_len - 1):
         logits, confidences = model(input_token, dimensions)
-        logits, confidences, refined_tokens, high_confidence_percentage = refine_predictions(
-            model, input_token, logits, confidences, dimensions, threshold=0.7
-        )
+        # logits, confidences, refined_tokens, high_confidence_percentage = refine_predictions(
+        #     model, input_token, logits, confidences, dimensions, threshold=0.7
+        # )
 
         outputs[:, t, :] = logits.squeeze(1)
 
