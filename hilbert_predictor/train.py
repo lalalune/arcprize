@@ -97,6 +97,7 @@ def train_step(
     tgt_lengths,
     dimensions,
     criterion,
+    confidence_values,  # Added parameter to collect confidence values
     teacher_forcing_ratio=1.2,
 ):
     batch_size, seq_len = tgt.size()
@@ -111,15 +112,16 @@ def train_step(
         logits, confidences = model(input_token, dimensions)
         logits, confidences, refined_tokens, high_confidence_percentage = (
             model.refine_predictions(
-                input_token, logits, confidences, dimensions, threshold=0.8
+                input_token, logits, confidences, dimensions, threshold=0.75
             )
         )
+        
+        # Collect confidence values for later averaging
+        confidence_values.append(high_confidence_percentage)
 
         outputs[:, t, :] = logits.squeeze(1)
 
-        # if loss is less than one, increase techer forcing ratio
         global last_loss
-
         teacher_forcing = torch.rand(1).item() < teacher_forcing_ratio - (
             1.0 - last_loss
         )
@@ -136,7 +138,6 @@ def train_step(
         special_mask = is_special_token(tgt[:, t + 1].unsqueeze(1), SPECIAL_TOKENS)
         input_token = torch.where(special_mask, tgt[:, t + 1].unsqueeze(1), next_input)
 
-    # Exclude special tokens from loss computation
     loss_mask = ~is_special_token(tgt, SPECIAL_TOKENS)
     loss = criterion(
         outputs[loss_mask].view(-1, NUM_TOKENS + 1), tgt[loss_mask].view(-1)
@@ -145,7 +146,6 @@ def train_step(
     last_loss = loss.item()
 
     return outputs, loss
-
 
 if __name__ == "__main__":
     start_epoch = 0
@@ -208,6 +208,7 @@ if __name__ == "__main__":
 
     for epoch in range(start_epoch, num_epochs):
         total_loss = 0
+        confidence_values = []
         model.optimizer.zero_grad()
 
         for batch_idx, (src, tgt, src_lengths, tgt_lengths, dimensions) in enumerate(
@@ -218,7 +219,7 @@ if __name__ == "__main__":
 
             with autocast(enabled=use_amp):
                 generated_ids, loss = train_step(
-                    model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion
+                    model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion, confidence_values
                 )
 
             loss.backward()
@@ -258,15 +259,18 @@ if __name__ == "__main__":
                 else:
                     print("No valid target tokens found for accuracy calculation.")
 
-                print("Input: ", src[0, :].tolist())
-                print("Predictions (clipped): ", predictions_clipped.tolist())
-                print("Expected: ", tgt_clipped.tolist())
+                print("Predicted: ", predictions_clipped.tolist())
+                print("Expected:  ", tgt_clipped.tolist())
                 print(f"Correct predictions: {correct} out of {total}")
 
             # Compute total batches
             print(
                 f"Epoch {epoch+1}, Batch {batch_idx+1}, Loss: {loss.item():.4f} - Loss for first token: {criterion(generated_ids[:, 0, :], tgt[:, 0])}"
             )
+            if confidence_values:  # Check to avoid division by zero
+                average_confidence = sum(confidence_values) / len(confidence_values)
+                print(f"Average High Confidence for Epoch {epoch+1}: {average_confidence:.2f}%")
+
 
             total_loss += loss.item()
 
