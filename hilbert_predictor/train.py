@@ -88,6 +88,7 @@ def collate_fn(batch):
 
 last_loss = 0
 confidence_history = deque(maxlen=10)
+last_threshold = 0.5
 
 def train_step(
     model,
@@ -119,7 +120,7 @@ def train_step(
             avg_confidence = 0.5  # Default value if not enough history
         
         min_threshold = 0.6
-        max_threshold = 0.99
+        max_threshold = 0.999
         min_confidence = 50
         max_confidence = 90
         
@@ -130,6 +131,10 @@ def train_step(
             threshold = max_threshold
         else:
             threshold = min_threshold + (avg_confidence - min_confidence) * (max_threshold - min_threshold) / (max_confidence - min_confidence)
+        
+        global last_threshold
+        last_threshold = threshold
+        
         logits, confidences, refined_tokens, high_confidence_percentage = (
             model.refine_predictions(
                 input_token, logits, confidences, dimensions, threshold=threshold
@@ -139,10 +144,6 @@ def train_step(
 
         # Collect confidence values for later averaging
         confidence_values.append(high_confidence_percentage)
-        
-
-
-
 
         outputs[:, t, :] = logits.squeeze(1)
 
@@ -290,7 +291,7 @@ if __name__ == "__main__":
 
             # Compute total batches
             print(
-                f"Epoch {epoch+1}, Batch {batch_idx+1}, Loss: {loss.item():.4f} - Loss for first token: {criterion(generated_ids[:, 0, :], tgt[:, 0])}"
+                f"Epoch {epoch+1}, Batch {batch_idx+1}, Loss: {loss.item():.4f} - Loss for first token: {criterion(generated_ids[:, 0, :], tgt[:, 0])} - Threshold: {last_threshold:.2f}"
             )
             if confidence_values:  # Check to avoid division by zero
                 average_confidence = sum(confidence_values) / len(confidence_values)
