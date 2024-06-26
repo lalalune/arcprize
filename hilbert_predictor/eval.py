@@ -13,9 +13,10 @@ from .data import (
     START_EXAMPLE_TOKEN,
     END_EXAMPLE_TOKEN,
 )
-from .gilbert2d import gilbert2d
+from .sequencing import gilbert2d
 from .model import model, device
 from .args import checkpoint_path, args
+
 
 def eval(checkpoint_path, device):
 
@@ -31,7 +32,7 @@ def eval(checkpoint_path, device):
     test_dataset = TensorDataset(
         torch.tensor(test_inputs, dtype=torch.long),
         torch.tensor(test_targets, dtype=torch.long),
-        torch.tensor([item[2] for item in test_data], dtype=torch.long),  
+        torch.tensor([item[2] for item in test_data], dtype=torch.long),
     )
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
@@ -54,25 +55,24 @@ def eval(checkpoint_path, device):
     total_predictions = 0
 
     with torch.no_grad():
-        for (src, tgt, dimensions) in test_loader:
+        for src, tgt, dimensions in test_loader:
             src, tgt = src.to(device), tgt.to(device)
             # Get the height and width from dimensions
             height, width = dimensions[0].tolist()
 
             # Create the appropriate dimensions for the PositionEncoder
-            position_encoder_dimensions = [[MAX_CONTEXT_LENGTH // height, MAX_CONTEXT_LENGTH // width]]
+            position_encoder_dimensions = [
+                [MAX_CONTEXT_LENGTH // height, MAX_CONTEXT_LENGTH // width]
+            ]
 
             # Generate output sequence
             output, _ = model(src, position_encoder_dimensions)
 
             _, predicted = torch.max(output.data, -1)
 
-
             # Find the end of the actual sequence (ignoring padding)
             tgt_end_idx = (tgt == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[1][0]
-            pred_end_idx = (predicted == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[
-                1
-            ]
+            pred_end_idx = (predicted == END_SEQUENCE_TOKEN).nonzero(as_tuple=True)[1]
             pred_end_idx = (
                 pred_end_idx[0] if pred_end_idx.numel() > 0 else predicted.size(1)
             )
@@ -166,5 +166,6 @@ def eval(checkpoint_path, device):
     #     "overall_non_zero_accuracy": overall_non_zero_accuracy,
     #     "completely_correct_percentage": completely_correct_percentage,
     # })
+
 
 eval(checkpoint_path, device)

@@ -5,6 +5,7 @@ import torch
 from .encoder import NUM_ENCODING_DIMENSIONS, PositionEncoder
 from .args import hilbert, quadtree
 
+
 # Gilbert2D - Generalized Hilbert Curve for 2D space-filling
 def gilbert2d(width, height):
     """
@@ -100,6 +101,7 @@ def flatten_2d_to_1d(array):
     else:
         raise ValueError(f"Input array must be 1D or 2D, got {array.ndim}D")
 
+
 def unflatten_1d_to_2d(array_1d, width, height):
     array_2d = [[None] * width for _ in range(height)]
     if hilbert:
@@ -111,27 +113,33 @@ def unflatten_1d_to_2d(array_1d, width, height):
                 array_2d[i][j] = array_1d[i * width + j]
     return array_2d
 
+
 def create_mapping_table():
     mapping_table = {}
-    position_encoder = PositionEncoder(30, 30, device='cpu')
+    position_encoder = PositionEncoder(30, 30, device="cpu")
     for height in range(1, 31):
         for width in range(1, 31):
             key = (height, width)
             if height == 1 or width == 1:
-                mapping = [(0, i) if height == 1 else (i, 0) for i in range(max(height, width))]
+                mapping = [
+                    (0, i) if height == 1 else (i, 0) for i in range(max(height, width))
+                ]
             else:
                 mapping = list(gilbert2d(width, height))
             encodings = position_encoder.compute_encodings(height, width)
             mapping_table[key] = (mapping, encodings)
     return mapping_table
 
-def save_mapping_table(mapping_table, filename='mapping_table.pkl'):
-    with open(filename, 'wb') as f:
+
+def save_mapping_table(mapping_table, filename="mapping_table.pkl"):
+    with open(filename, "wb") as f:
         pickle.dump(mapping_table, f)
 
-def load_mapping_table(filename='mapping_table.pkl'):
-    with open(filename, 'rb') as f:
+
+def load_mapping_table(filename="mapping_table.pkl"):
+    with open(filename, "rb") as f:
         return pickle.load(f)
+
 
 def test_mapping():
     mapping_table = load_mapping_table()
@@ -140,17 +148,30 @@ def test_mapping():
             mapping, encodings = mapping_table[(height, width)]
             # mapping[0] is a tuple
             coord = mapping[0]
-            assert isinstance(coord, tuple), "First element of mapping should be a tuple"
-            assert len(mapping) == height * width, f"Incorrect mapping length for {height}x{width}"
-            assert encodings.shape == (height, width, NUM_ENCODING_DIMENSIONS), f"Incorrect encoding shape for {height}x{width} at {NUM_ENCODING_DIMENSIONS}: {encodings.shape}"
-            assert torch.all(encodings[:, :, 0] >= -1) and torch.all(encodings[:, :, 0] <= 1), "X values out of range"
-            assert torch.all(encodings[:, :, 1] >= -1) and torch.all(encodings[:, :, 1] <= 1), "Y values out of range"
+            assert isinstance(
+                coord, tuple
+            ), "First element of mapping should be a tuple"
+            assert (
+                len(mapping) == height * width
+            ), f"Incorrect mapping length for {height}x{width}"
+            assert encodings.shape == (
+                height,
+                width,
+                NUM_ENCODING_DIMENSIONS,
+            ), f"Incorrect encoding shape for {height}x{width} at {NUM_ENCODING_DIMENSIONS}: {encodings.shape}"
+            assert torch.all(encodings[:, :, 0] >= -1) and torch.all(
+                encodings[:, :, 0] <= 1
+            ), "X values out of range"
+            assert torch.all(encodings[:, :, 1] >= -1) and torch.all(
+                encodings[:, :, 1] <= 1
+            ), "Y values out of range"
 
     print("All dimension and value tests passed.")
 
-
     def test_case(matrix):
-        height, width = len(matrix), len(matrix[0]) if isinstance(matrix[0], list) else 1
+        height, width = len(matrix), (
+            len(matrix[0]) if isinstance(matrix[0], list) else 1
+        )
         flattened = flatten_2d_to_1d(matrix)
 
         if height == 1 and width == 1:
@@ -163,7 +184,9 @@ def test_mapping():
             if hilbert:
                 reconstructed = [[0] * width for _ in range(height)]
                 for idx, value in enumerate(flattened):
-                    x, y = mapping_table[(height, width)][0][idx]  # Get the x, y coordinates from the tuple
+                    x, y = mapping_table[(height, width)][0][
+                        idx
+                    ]  # Get the x, y coordinates from the tuple
                     reconstructed[y][x] = value
             else:
                 reconstructed = unflatten_1d_to_2d(flattened, width, height)
@@ -177,12 +200,13 @@ def test_mapping():
     test_case([[1], [2], [3]])  # 3x1
     test_case([[1, 2], [3, 4]])  # 2x2
     test_case([[1, 2, 3], [4, 5, 6], [7, 8, 9]])  # 3x3
-    test_case([[i for i in range(j*5+1, (j+1)*5+1)] for j in range(5)])  # 5x5
+    test_case([[i for i in range(j * 5 + 1, (j + 1) * 5 + 1)] for j in range(5)])  # 5x5
 
-mapping_table_file = 'hilbert_mapping_quadtree.pkl'
+
+mapping_table_file = "hilbert_mapping_quadtree.pkl"
 if quadtree is False:
-    mapping_table_file = 'mapping_table.pkl'
-    
+    mapping_table_file = "mapping_table.pkl"
+
 if os.path.exists(mapping_table_file):
     print("Loading existing mapping table...")
     mapping_table = load_mapping_table(mapping_table_file)
@@ -190,7 +214,7 @@ else:
     print("Creating new mapping table...")
     mapping_table = create_mapping_table()
     save_mapping_table(mapping_table, mapping_table_file)
-    
+
 if __name__ == "__main__":
     test_mapping()
     print("All tests passed.")
