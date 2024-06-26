@@ -5,8 +5,8 @@ import json
 import random
 import torch
 
-from .sequencing import flatten_2d_to_1d
-from .args import args
+from .mapping import flatten_2d_to_1d
+from .args import kindergarten
 
 # Token definitions
 PAD_TOKEN = 10
@@ -28,7 +28,7 @@ def is_special_token(tensor, special_tokens):
     return torch.stack([tensor == tok for tok in special_tokens]).any(dim=0)
 
 
-if args.simple:
+if kindergarten:
     MAX_CONTEXT_LENGTH = 256
     MAX_PREDICTION_LENGTH = 32
 else:
@@ -153,7 +153,7 @@ def load_and_process_training_data(file_paths):
     return processed_data
 
 
-if args.simple:
+if kindergarten:
     training_data_dir = simple_dataset + "training"
     evaluating_data_dir = simple_dataset + "evaluation"
 
@@ -190,7 +190,7 @@ else:
     print("arc-datasets folder not found. Proceeding with original data only.")
     print("arc_datasets_dir", arc_datasets_dir)
 
-if args.simple:
+if kindergarten:
     processed_training_file = "processed_training_data_simple.pkl"
     processed_evaluating_file = "processed_evaluating_data_simple.pkl"
 else:

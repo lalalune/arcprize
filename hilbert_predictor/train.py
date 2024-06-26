@@ -11,9 +11,8 @@ from .model import (
     num_layers,
     dim_feedforward,
     device,
-    batch_size,
 )
-from .args import checkpoint_path, dropout_rate, batch_size, use_schedulefree
+from .args import checkpoint_path, dropout_rate, batch_size, use_schedulefree, use_grokfast, use_wandb
 
 from .data import (
     END_OUTPUT_MATRIX_TOKEN,
@@ -24,7 +23,6 @@ from .data import (
     SPECIAL_TOKENS,
     training_data,
 )
-from .args import args
 from torch.cuda.amp import autocast, GradScaler
 from torch.nn import CrossEntropyLoss
 from collections import deque
@@ -215,7 +213,7 @@ if __name__ == "__main__":
     if use_schedulefree:
         model.optimizer.train()
 
-    if args.wandb:
+    if use_wandb:
         import wandb
 
         wandb.init(
@@ -250,11 +248,12 @@ if __name__ == "__main__":
             loss.backward()
 
             # fastgrok, ignored for now
-            grads = gradfilter_ma(model, grads=grads)
+            if use_grokfast:
+                grads = gradfilter_ma(model, grads=grads)
 
-            # Apply gradient clipping
-            max_grad_norm = 1.0  # Adjust this value as needed
-            clip_grad_norm(model.parameters(), max_grad_norm)
+                # Apply gradient clipping
+                max_grad_norm = 1.0  # Adjust this value as needed
+                clip_grad_norm(model.parameters(), max_grad_norm)
 
             model.optimizer.step()
             model.optimizer.zero_grad()
@@ -309,7 +308,7 @@ if __name__ == "__main__":
             checkpoint_path,
         )
 
-        if args.wandb:
+        if use_wandb:
             wandb.log({"epoch": epoch + 1, "avg_loss": avg_loss})
             wandb.save(str(checkpoint_path))
 

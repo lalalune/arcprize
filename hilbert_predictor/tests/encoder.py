@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from ..args import quadtree
-from ..encoder import PositionEncoder
+from ..args import use_quadtree
+from ..encoder import PositionEncoder, compute_quadtree_code
 
 
 def test_position_encoder():
@@ -11,26 +11,26 @@ def test_position_encoder():
     dimensions = [[1, 1]]
     output = encoder(x, dimensions)
 
-    # Determine expected output dimensions based on `quadtree` setting
+    # Determine expected output dimensions based on `use_quadtree` setting
     expected_dim = 1 + (
-        10 if quadtree else 0
-    )  # adding 10 if quadtree is true, else just 1
+        10 if use_quadtree else 0
+    )  # adding 10 if use_quadtree is true, else just 1
     assert output.shape == (
         1,
         1,
         expected_dim,
     ), f"Incorrect output shape for 1x1: {output.shape}"
 
-    if quadtree:
+    if use_quadtree:
         assert torch.all(
             output[0, 0, 1:]
             == torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], device=device)
-        ), "Incorrect quadtree encoding for 1x1"
+        ), "Incorrect use_quadtree encoding for 1x1"
     else:
-        # Verify that the output is same as the input if quadtree is false
+        # Verify that the output is same as the input if use_quadtree is false
         assert torch.all(
             output == x
-        ), "Output should be identical to input when quadtree is False"
+        ), "Output should be identical to input when use_quadtree is False"
 
     print("All PositionEncoder tests passed.")
 

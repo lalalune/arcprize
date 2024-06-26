@@ -1,7 +1,7 @@
 import numpy as np
 import os
 
-from ..sequencing import unflatten_1d_to_2d
+from ..mapping import unflatten_1d_to_2d
 from ..data import training_data_dir, load_and_process_training_data, process_data
 
 
@@ -92,3 +92,4 @@ if __name__ == "__main__":
     print(f"Output: {processed_2x2[0][1]}")
     print(f"Dimensions: {processed_2x2[0][2]}")
     analyze_dataset(training_data)
+    print("Tests passed.")

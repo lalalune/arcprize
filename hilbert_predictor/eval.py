@@ -13,16 +13,15 @@ from .data import (
     START_EXAMPLE_TOKEN,
     END_EXAMPLE_TOKEN,
 )
-from .sequencing import gilbert2d
 from .model import model, device
-from .args import checkpoint_path, args
+from .args import checkpoint_path, kindergarten
 
 
 def eval(checkpoint_path, device):
 
     # Load the test data
     # wandb.init(project="hilbert_predictor", job_type="eval")
-    if args.simple:
+    if kindergarten:
         test_data = np.load("processed_evaluating_data_simple.pkl", allow_pickle=True)
     else:
         test_data = np.load("processed_evaluating_data.pkl", allow_pickle=True)

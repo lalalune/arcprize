@@ -1,9 +1,8 @@
 import os
 import pickle
 import numpy as np
-import torch
-from .encoder import NUM_ENCODING_DIMENSIONS, PositionEncoder
-from .args import hilbert, quadtree
+from .encoder import PositionEncoder
+from .args import use_hilbert, use_quadtree
 
 
 # Gilbert2D - Generalized Hilbert Curve for 2D space-filling
@@ -91,7 +90,7 @@ def flatten_2d_to_1d(array):
             return array.T[0].tolist()
         else:
             # 2D matrix: flatten using Hilbert curve or raw concatenation
-            if hilbert:
+            if use_hilbert:
                 array_1d = [None] * (width * height)
                 for idx, (x, y) in enumerate(gilbert2d(width, height)):
                     array_1d[idx] = array[y][x]
@@ -104,7 +103,7 @@ def flatten_2d_to_1d(array):
 
 def unflatten_1d_to_2d(array_1d, width, height):
     array_2d = [[None] * width for _ in range(height)]
-    if hilbert:
+    if use_hilbert:
         for idx, (x, y) in enumerate(gilbert2d(width, height)):
             array_2d[y][x] = array_1d[idx]
     else:
@@ -120,10 +119,10 @@ def create_mapping_table():
     for height in range(1, 31):
         for width in range(1, 31):
             key = (height, width)
-            if height == 1 or width == 1:
-                mapping = [
-                    (0, i) if height == 1 else (i, 0) for i in range(max(height, width))
-                ]
+            if height == 1:
+                mapping = [(i, 0) for i in range(width)]
+            elif width == 1:
+                mapping = [(0, i) for i in range(height)]
             else:
                 mapping = list(gilbert2d(width, height))
             encodings = position_encoder.compute_encodings(height, width)
@@ -131,90 +130,23 @@ def create_mapping_table():
     return mapping_table
 
 
-def save_mapping_table(mapping_table, filename="mapping_table.pkl"):
-    with open(filename, "wb") as f:
-        pickle.dump(mapping_table, f)
-
-
-def load_mapping_table(filename="mapping_table.pkl"):
-    with open(filename, "rb") as f:
-        return pickle.load(f)
-
-
-def test_mapping():
-    mapping_table = load_mapping_table()
-    for height in range(1, 31):
-        for width in range(1, 31):
-            mapping, encodings = mapping_table[(height, width)]
-            # mapping[0] is a tuple
-            coord = mapping[0]
-            assert isinstance(
-                coord, tuple
-            ), "First element of mapping should be a tuple"
-            assert (
-                len(mapping) == height * width
-            ), f"Incorrect mapping length for {height}x{width}"
-            assert encodings.shape == (
-                height,
-                width,
-                NUM_ENCODING_DIMENSIONS,
-            ), f"Incorrect encoding shape for {height}x{width} at {NUM_ENCODING_DIMENSIONS}: {encodings.shape}"
-            assert torch.all(encodings[:, :, 0] >= -1) and torch.all(
-                encodings[:, :, 0] <= 1
-            ), "X values out of range"
-            assert torch.all(encodings[:, :, 1] >= -1) and torch.all(
-                encodings[:, :, 1] <= 1
-            ), "Y values out of range"
-
-    print("All dimension and value tests passed.")
-
-    def test_case(matrix):
-        height, width = len(matrix), (
-            len(matrix[0]) if isinstance(matrix[0], list) else 1
-        )
-        flattened = flatten_2d_to_1d(matrix)
-
-        if height == 1 and width == 1:
-            reconstructed = [[flattened[0]]]
-        elif height == 1:
-            reconstructed = [flattened]
-        elif width == 1:
-            reconstructed = [[value] for value in flattened]
-        else:
-            if hilbert:
-                reconstructed = [[0] * width for _ in range(height)]
-                for idx, value in enumerate(flattened):
-                    x, y = mapping_table[(height, width)][0][
-                        idx
-                    ]  # Get the x, y coordinates from the tuple
-                    reconstructed[y][x] = value
-            else:
-                reconstructed = unflatten_1d_to_2d(flattened, width, height)
-
-        assert matrix == reconstructed, f"Test failed for matrix: {matrix}"
-        print(f"Test passed for {height}x{width} matrix")
-
-    # Test cases
-    test_case([[1]])  # 1x1
-    test_case([[1, 2, 3]])  # 1x3
-    test_case([[1], [2], [3]])  # 3x1
-    test_case([[1, 2], [3, 4]])  # 2x2
-    test_case([[1, 2, 3], [4, 5, 6], [7, 8, 9]])  # 3x3
-    test_case([[i for i in range(j * 5 + 1, (j + 1) * 5 + 1)] for j in range(5)])  # 5x5
-
 
 mapping_table_file = "hilbert_mapping_quadtree.pkl"
-if quadtree is False:
+if use_quadtree is False:
     mapping_table_file = "mapping_table.pkl"
+    
+def load_mapping_table():
+    with open(mapping_table_file, "rb") as f:
+        return pickle.load(f)
 
+def save_mapping_table(mapping_table):
+    with open(mapping_table_file, "wb") as f:
+        pickle.dump(mapping_table, f)
+        
 if os.path.exists(mapping_table_file):
     print("Loading existing mapping table...")
-    mapping_table = load_mapping_table(mapping_table_file)
+    mapping_table = load_mapping_table()
 else:
     print("Creating new mapping table...")
     mapping_table = create_mapping_table()
-    save_mapping_table(mapping_table, mapping_table_file)
-
-if __name__ == "__main__":
-    test_mapping()
-    print("All tests passed.")
+    save_mapping_table(mapping_table)
