@@ -84,8 +84,8 @@ def collate_fn(batch):
     )
     return src_padded, tgt_padded, src_lengths, tgt_lengths, dimensions_list
 
-
-def train_step(model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion, teacher_forcing_ratio=0.5):
+last_loss = 0
+def train_step(model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion, teacher_forcing_ratio=1.2):
     batch_size, seq_len = tgt.size()
     outputs = torch.zeros(batch_size, seq_len, NUM_TOKENS + 1, device=device)
 
@@ -100,7 +100,10 @@ def train_step(model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion,
 
         outputs[:, t, :] = logits.squeeze(1)
 
-        teacher_forcing = torch.rand(1).item() < teacher_forcing_ratio
+        # if loss is less than one, increase techer forcing ratio
+        global last_loss
+
+        teacher_forcing = torch.rand(1).item() < teacher_forcing_ratio - (1.0 - last_loss)
         
         if teacher_forcing:
             next_input = tgt[:, t+1].unsqueeze(1)
@@ -118,6 +121,8 @@ def train_step(model, src, tgt, src_lengths, tgt_lengths, dimensions, criterion,
     # Exclude special tokens from loss computation
     loss_mask = ~is_special_token(tgt, SPECIAL_TOKENS)
     loss = criterion(outputs[loss_mask].view(-1, NUM_TOKENS + 1), tgt[loss_mask].view(-1))
+
+    last_loss = loss.item()
 
     return outputs, loss
 
