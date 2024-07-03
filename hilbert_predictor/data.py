@@ -39,7 +39,7 @@ MAX_SEQUENCE_LENGTH = MAX_CONTEXT_LENGTH + MAX_PREDICTION_LENGTH
 
 evaluating_data = None
 
-simple_dataset = "arc-datasets/datasets/1D-ARC/"
+simple_dataset = "arc-datasets/datasets/kindergarten/"
 
 
 def pad_sequence(sequence, max_length, pad_value, left_pad=False):
@@ -107,19 +107,12 @@ def process_data(data_list):
                 END_SEQUENCE_TOKEN,
             ]
 
-            print("context", context)
-            print("target", target)
-            # print the first and last token of each
-            print("context first/last", context[0], context[-1])
-            print("target first/last", target[0], target[-1])
-
             context = pad_sequence(
                 context, MAX_CONTEXT_LENGTH, PAD_TOKEN, left_pad=True
             )
             target = pad_sequence(target, MAX_PREDICTION_LENGTH, PAD_TOKEN)
 
             dimensions = test_input.shape  # Already 2D due to atleast_2d
-            print(f"Processed data: Dimensions: {dimensions}")
 
             processed_data.append((np.array(context), np.array(target), dimensions))
 
@@ -141,7 +134,6 @@ def is_within_bounds(data, max_dim=12):
 def load_and_process_training_data(file_paths):
     processed_data = []
     for file_path in file_paths:
-        print("Loading file:", file_path)
         with open(file_path, "r") as f:
             data = json.load(f)
             if is_within_bounds(data):
@@ -167,7 +159,7 @@ training_file_paths = [
     for f in os.listdir(training_data_dir)
     if f.endswith(".json")
 ]
-print("training_file_paths", training_file_paths)
+
 evaluating_file_paths = [
     os.path.join(evaluating_data_dir, f)
     for f in os.listdir(evaluating_data_dir)

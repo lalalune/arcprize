@@ -12,7 +12,7 @@ if not is_running_under_pytest():
     parser.add_argument(
         "--kindergarten",
         action="store_true",
-        help='Load data only from the "arc-datasets/datasets/1D-ARC/training" directory',
+        help='Load data only from the "arc-datasets/datasets/kindergarten/data/training" directory',
     )
     parser.add_argument(
         "--wandb", action="store_true", help="Enable Weights & Biases logging"

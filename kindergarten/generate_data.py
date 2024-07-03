@@ -5,103 +5,111 @@ import numpy as np
 import random
 import hashlib
 import argparse
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
 
-def generate_binary_matrix(shape):
-    return np.random.randint(0, 2, size=shape).tolist()
+def identity_transform(shape):
+    return shape
 
-def identity_kernel(shape):
-    return np.eye(*shape)
+def flip_transform(shape):
+    return (1 - shape).astype(int)
 
-def flip_kernel(shape):
-    return 1 - np.eye(*shape)
+def shift_left_transform(shape):
+    return np.roll(shape, -1, axis=1)
 
-def shift_left_kernel(shape):
-    kernel = np.eye(*shape)
-    return np.roll(kernel, -1, axis=1)
+def shift_right_transform(shape):
+    return np.roll(shape, 1, axis=1)
 
-def shift_right_kernel(shape):
-    kernel = np.eye(*shape)
-    return np.roll(kernel, 1, axis=1)
+def flip_bit_transform(shape, bit_index):
+    shape = shape.copy()
+    if shape.shape[1] > bit_index:
+        shape[0, bit_index] = 1 - shape[0, bit_index]
+    return shape.astype(int)
 
-def flip_bit_kernel(shape, bit_index):
-    kernel = np.eye(*shape)
-    if shape[1] > bit_index:
-        kernel[0, bit_index] = 1 - kernel[0, bit_index]
-    return kernel
+def and_transform(shape):
+    return np.all(shape, axis=0, keepdims=True).astype(int)
 
-def and_kernel(shape):
-    return np.ones(shape)
+def or_transform(shape):
+    return np.any(shape, axis=0, keepdims=True).astype(int)
 
-def or_kernel(shape):
-    return np.ones(shape)
+def xor_transform(shape):
+    return (np.sum(shape, axis=0, keepdims=True) % 2).astype(int)
 
-def xor_kernel(shape):
-    return np.ones(shape)
+def not_transform(shape):
+    return (1 - shape).astype(int)
 
-def not_kernel(shape):
-    return 1 - np.eye(*shape)
+def rotate_90_transform(shape):
+    return np.rot90(shape, 1).astype(int)
 
-def rotate_90_kernel(shape):
-    return np.rot90(np.eye(*shape))
+def rotate_180_transform(shape):
+    return np.rot90(shape, 2).astype(int)
 
-def rotate_180_kernel(shape):
-    return np.rot90(np.eye(*shape), 2)
+def rotate_270_transform(shape):
+    return np.rot90(shape, 3).astype(int)
 
-def rotate_270_kernel(shape):
-    return np.rot90(np.eye(*shape), 3)
+def mirror_transform(shape):
+    return np.fliplr(shape).astype(int)
 
-def mirror_kernel(shape):
-    return np.fliplr(np.eye(*shape))
+def mirror_rotate_90_transform(shape):
+    return np.rot90(np.fliplr(shape), 1).astype(int)
 
-def mirror_rotate_90_kernel(shape):
-    return np.rot90(np.fliplr(np.eye(*shape)))
+def mirror_rotate_180_transform(shape):
+    return np.rot90(np.fliplr(shape), 2).astype(int)
 
-def mirror_rotate_180_kernel(shape):
-    return np.rot90(np.fliplr(np.eye(*shape)), 2)
+def mirror_rotate_270_transform(shape):
+    return np.rot90(np.fliplr(shape), 3).astype(int)
 
-def mirror_rotate_270_kernel(shape):
-    return np.rot90(np.fliplr(np.eye(*shape)), 3)
+def row_and_transform(shape):
+    return np.all(shape, axis=1, keepdims=True).astype(int)
 
-def row_and_kernel(shape):
-    return np.ones(shape)
+def row_or_transform(shape):
+    return np.any(shape, axis=1, keepdims=True).astype(int)
 
-def row_or_kernel(shape):
-    return np.ones(shape)
+def row_xor_transform(shape):
+    return (np.sum(shape, axis=1, keepdims=True) % 2).astype(int)
 
-def row_xor_kernel(shape):
-    return np.ones(shape)
+def row_not_transform(shape):
+    return (1 - np.all(shape, axis=1, keepdims=True)).astype(int)
 
-def row_not_kernel(shape):
-    return 1 - np.eye(*shape)
+def col_and_transform(shape):
+    return np.all(shape, axis=0, keepdims=True).astype(int)
 
-def col_and_kernel(shape):
-    return np.ones(shape)
+def col_or_transform(shape):
+    return np.any(shape, axis=0, keepdims=True).astype(int)
 
-def col_or_kernel(shape):
-    return np.ones(shape)
+def col_xor_transform(shape):
+    return (np.sum(shape, axis=0, keepdims=True) % 2).astype(int)
 
-def col_xor_kernel(shape):
-    return np.ones(shape)
+def col_not_transform(shape):
+    return (1 - np.all(shape, axis=0, keepdims=True)).astype(int)
 
-def col_not_kernel(shape):
-    return 1 - np.eye(*shape)
-
-def generate_example(shape, kernel_func, digits=(0, 1)):
-    kernel = kernel_func(shape)
-    input_matrix = [[random.choice(digits) for _ in range(shape[1])] for _ in range(shape[0])]
-    output_matrix = apply_kernel(input_matrix, kernel, digits)
+def generate_example(shape, transform_func, digits=(0, 1)):
+    input_matrix = np.array([[random.choice(digits) for _ in range(shape[1])] for _ in range(shape[0])])
+    output_matrix = transform_func(input_matrix).astype(int)
     
     return {
-        'input': input_matrix,
-        'output': output_matrix
+        'input': input_matrix.tolist(),
+        'output': output_matrix.tolist()
     }
 
-def generate_challenge(shape, kernel_func, num_train_pairs, digits=(0, 1)):
-    train = [generate_example(shape, kernel_func, digits) for _ in range(num_train_pairs)]
-    test = [generate_example(shape, kernel_func, digits)]  # Now a list with one example
+def generate_challenge(shape, transform_func, num_train_pairs, digits=(0, 1), max_attempts=100):
+    train = []
+    examples_seen = set()
+    attempts = 0
+    
+    while len(train) < num_train_pairs and attempts < max_attempts:
+        example = generate_example(shape, transform_func, digits)
+        example_hash = hashlib.sha256(str(example).encode()).hexdigest()
+        
+        if example_hash not in examples_seen:
+            train.append(example)
+            examples_seen.add(example_hash)
+        
+        attempts += 1
+    
+    test = [generate_example(shape, transform_func, digits)]
     
     return {
         'train': train,
@@ -109,159 +117,249 @@ def generate_challenge(shape, kernel_func, num_train_pairs, digits=(0, 1)):
         'digits': digits
     }
 
-
-def generate_all_challenges(shape, kernels, all_digits=False):
-    challenges = []
-    digit_pairs = list(itertools.combinations(range(10), 2)) if all_digits else [(0, 1)]
+def save_challenge(challenge, output_dir, augment=False):
+    # Convert any boolean values to integers
+    for example in challenge['train'] + challenge['test']:
+        example['output'] = [[int(val) for val in row] for row in example['output']]
     
-    for kernel_name, kernel_func in kernels.items():
+    challenge_json = json.dumps(challenge, separators=(',', ':'))
+    hash_object = hashlib.sha256(challenge_json.encode())
+    hash_hex = hash_object.hexdigest()
+    
+    output_file = os.path.join(output_dir, f"{hash_hex}.json")
+    
+    with open(output_file, "w") as f:
+        f.write(challenge_json)
+    
+    if augment:
+        augmentations = [
+            lambda x: x,
+            lambda x: np.fliplr(x),
+            lambda x: np.flipud(x),
+            lambda x: x.T,
+            lambda x: np.fliplr(x).T,
+            lambda x: np.flipud(x).T,
+            lambda x: np.fliplr(x.T),
+            lambda x: np.flipud(x.T)
+        ]
+        
+        digit_pairs = [(1, 9), (2, 7), (3, 4), (0, 4), (8, 0)]  # Define specific token pairs
+        
         for digits in digit_pairs:
-            num_train_pairs = random.randint(2, 4)
-            challenge = generate_challenge(shape, kernel_func, num_train_pairs, digits)
-            challenge['rule'] = kernel_name
-            challenges.append(challenge)
+            for augment_input, augment_output in itertools.product(augmentations, repeat=2):
+                augmented_challenge = {
+                    'train': [],
+                    'test': [],
+                    'digits': list(digits),
+                    'rule': challenge['rule']
+                }
+                
+                for example in challenge['train']:
+                    augmented_example = {
+                        'input': augment_input(np.array(example['input'])).tolist(),
+                        'output': augment_output(np.array(example['output'])).tolist()
+                    }
+                    augmented_challenge['train'].append(augmented_example)
+                
+                for example in challenge['test']:
+                    augmented_example = {
+                        'input': augment_input(np.array(example['input'])).tolist(),
+                        'output': augment_output(np.array(example['output'])).tolist()
+                    }
+                    augmented_challenge['test'].append(augmented_example)
+                
+                augmented_json = json.dumps(augmented_challenge, separators=(',', ':'))
+                augmented_hash = hashlib.sha256(augmented_json.encode()).hexdigest()
+                augmented_output_file = os.path.join(output_dir, f"{augmented_hash}.json")
+                
+                with open(augmented_output_file, "w") as f:
+                    f.write(augmented_json)
+
+def generate_all_challenges(shape, transforms, max_challenges, output_dir, augment=False):
+    challenges = []
+    digit_pairs = [(0, 1)]
+    
+    if augment:
+        # create every possible digit pair
+        digit_pair_1 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        digit_pair_2 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        
+        digit_pairs = []
+        
+        # for each possible digit pair, add it to the list
+        for digit_1 in digit_pair_1:
+            for digit_2 in digit_pair_2:
+                if digit_1 != digit_2:
+                    digit_pairs.append((digit_1, digit_2))
+    
+    for transform_name, transform_func in transforms.items():
+        for digits in digit_pairs:
+            if len(challenges) >= max_challenges:
+                return challenges
+            
+            num_train_pairs = random.randint(3, 5)
+            challenge = generate_challenge(shape, transform_func, num_train_pairs, digits)
+            
+            if len(challenge['train']) == num_train_pairs:
+                challenge['rule'] = transform_name
+                challenges.append(challenge)
+                save_challenge(challenge, output_dir, augment)
+    
     return challenges
 
-def apply_kernel(binary_matrix, kernel, digits):
-    input_array = np.array([[1 if x == digits[1] else 0 for x in row] for row in binary_matrix])
-    
-    if input_array.shape == kernel.shape:
-        output_array = (input_array * kernel) % 2
-    elif input_array.shape[1] == kernel.shape[1]:
-        output_array = (input_array + kernel) % 2
-    else:
-        output_array = np.dot(input_array, kernel) % 2
-
-    output_array = output_array.astype(int)
-    return [[digits[x] for x in row] for row in output_array]
-
-def save_challenges(challenges, output_dir, train_ratio=0.9):
-    train_dir = os.path.join(output_dir, "training")
-    eval_dir = os.path.join(output_dir, "evaluation")
-    
-    for directory in [train_dir, eval_dir]:
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-    
-    random.shuffle(challenges)
-    split_index = int(len(challenges) * train_ratio)
-    
-    for i, challenge in enumerate(challenges):
-        challenge_json = json.dumps(challenge, indent=4)
-        hash_object = hashlib.sha256(challenge_json.encode())
-        hash_hex = hash_object.hexdigest()
-        
-        if i < split_index:
-            output_file = os.path.join(train_dir, f"{hash_hex}.json")
-        else:
-            output_file = os.path.join(eval_dir, f"{hash_hex}.json")
-        
-        with open(output_file, "w") as f:
-            f.write(challenge_json)
-
-def generate_bitdata(output_dir, all_digits=False):
+def generate_bitdata(output_dir, max_challenges, augment):
     # 1x1 challenges
-    kernels_1x1 = {
-        "IDENTITY": identity_kernel,
-        "FLIP": flip_kernel
+    transforms_1x1 = {
+        "IDENTITY": identity_transform,
+        "FLIP": flip_transform
     }
-    challenges_1x1 = generate_all_challenges((1, 1), kernels_1x1, all_digits)
+    challenges_1x1 = generate_all_challenges((1, 1), transforms_1x1, max_challenges, output_dir, augment)
     
     # 1x2 challenges
-    kernels_1x2 = {
-        "IDENTITY": identity_kernel,
-        "SHIFT_LEFT": shift_left_kernel,
-        "SHIFT_RIGHT": shift_right_kernel,
-        "FLIP_FIRST_BIT": flip_first_bit,
-        "FLIP_SECOND_BIT": flip_second_bit,
-        "AND": and_kernel,
-        "OR": or_kernel,
-        "XOR": xor_kernel,
-        "NOT": not_kernel
+    transforms_1x2 = {
+        "IDENTITY": identity_transform,
+        "SHIFT_LEFT": shift_left_transform,
+        "SHIFT_RIGHT": shift_right_transform,
+        "FLIP_FIRST_BIT": lambda shape: flip_bit_transform(shape, 0),
+        "FLIP_SECOND_BIT": lambda shape: flip_bit_transform(shape, 1),
+        "AND": and_transform,
+        "OR": or_transform,
+        "XOR": xor_transform,
+        "NOT": not_transform
     }
-    challenges_1x2 = generate_all_challenges((1, 2), kernels_1x2, all_digits)
-    
-    save_challenges(challenges_1x1 + challenges_1x2, output_dir)
+    challenges_1x2 = generate_all_challenges((1, 2), transforms_1x2, max_challenges, output_dir, augment)
 
-def generate_bitdata_grade1(output_dir, all_digits=False):
+def generate_bitdata_grade1(output_dir, max_challenges, augment):
     # 1x3 challenges
-    kernels_1x3 = {
-        "IDENTITY": identity_kernel,
-        "SHIFT_LEFT": shift_left_kernel,
-        "SHIFT_RIGHT": shift_right_kernel,
-        "FLIP_FIRST_BIT": flip_first_bit,
-        "FLIP_SECOND_BIT": flip_second_bit,
-        "FLIP_THIRD_BIT": flip_third_bit,
-        "AND": and_kernel,
-        "OR": or_kernel,
-        "XOR": xor_kernel,
-        "NOT": not_kernel
+    transforms_1x3 = {
+        "IDENTITY": identity_transform,
+        "SHIFT_LEFT": shift_left_transform,
+        "SHIFT_RIGHT": shift_right_transform,
+        "FLIP_FIRST_BIT": lambda shape: flip_bit_transform(shape, 0),
+        "FLIP_SECOND_BIT": lambda shape: flip_bit_transform(shape, 1),
+        "FLIP_THIRD_BIT": lambda shape: flip_bit_transform(shape, 2),
+        "AND": and_transform,
+        "OR": or_transform,
+        "XOR": xor_transform,
+        "NOT": not_transform
     }
-    challenges_1x3 = generate_all_challenges((1, 3), kernels_1x3, all_digits)
+    challenges_1x3 = generate_all_challenges((1, 3), transforms_1x3, max_challenges, output_dir, augment)
     
     # 1x4 challenges
-    kernels_1x4 = {
-        "IDENTITY": identity_kernel,
-        "SHIFT_LEFT": shift_left_kernel,
-        "SHIFT_RIGHT": shift_right_kernel,
-        "FLIP_FIRST_BIT": flip_first_bit,
-        "FLIP_SECOND_BIT": flip_second_bit,
-        "FLIP_THIRD_BIT": flip_third_bit,
-        "FLIP_FOURTH_BIT": flip_fourth_bit,
-        "AND": and_kernel,
-        "OR": or_kernel,
-        "XOR": xor_kernel,
-        "NOT": not_kernel
+    transforms_1x4 = {
+        "IDENTITY": identity_transform,
+        "SHIFT_LEFT": shift_left_transform,
+        "SHIFT_RIGHT": shift_right_transform,
+        "FLIP_FIRST_BIT": lambda shape: flip_bit_transform(shape, 0),
+        "FLIP_SECOND_BIT": lambda shape: flip_bit_transform(shape, 1),
+        "FLIP_THIRD_BIT": lambda shape: flip_bit_transform(shape, 2),
+        "FLIP_FOURTH_BIT": lambda shape: flip_bit_transform(shape, 3),
+        "AND": and_transform,
+        "OR": or_transform,
+        "XOR": xor_transform,
+        "NOT": not_transform
     }
-    challenges_1x4 = generate_all_challenges((1, 4), kernels_1x4, all_digits)
+    challenges_1x4 = generate_all_challenges((1, 4), transforms_1x4, max_challenges, output_dir, augment)
     
     # 2x2 challenges
-    kernels_2x2 = {
-        "IDENTITY": identity_kernel,
-        "ROTATE_90": rotate_90_kernel,
-        "ROTATE_180": rotate_180_kernel,
-        "ROTATE_270": rotate_270_kernel,
-        "MIRROR": mirror_kernel,
-        "MIRROR_ROTATE_90": mirror_rotate_90_kernel,
-        "MIRROR_ROTATE_180": mirror_rotate_180_kernel,
-        "MIRROR_ROTATE_270": mirror_rotate_270_kernel,
-        "ROW_AND": row_and_kernel,
-        "ROW_OR": row_or_kernel,
-        "ROW_XOR": row_xor_kernel,
-        "ROW_NOT": row_not_kernel,
-        "COL_AND": col_and_kernel,
-        "COL_OR": col_or_kernel,
-        "COL_XOR": col_xor_kernel,
-        "COL_NOT": col_not_kernel
+    transforms_2x2 = {
+        "IDENTITY": identity_transform,
+        "ROTATE_90": rotate_90_transform,
+        "ROTATE_180": rotate_180_transform,
+        "ROTATE_270": rotate_270_transform,
+        "MIRROR": mirror_transform,
+        "MIRROR_ROTATE_90": mirror_rotate_90_transform,
+        "MIRROR_ROTATE_180": mirror_rotate_180_transform,
+        "MIRROR_ROTATE_270": mirror_rotate_270_transform,
+        "ROW_AND": row_and_transform,
+        "ROW_OR": row_or_transform,
+        "ROW_XOR": row_xor_transform,
+        "ROW_NOT": row_not_transform,
+        "COL_AND": col_and_transform,
+        "COL_OR": col_or_transform,
+        "COL_XOR": col_xor_transform,
+        "COL_NOT": col_not_transform
     }
-    challenges_2x2 = generate_all_challenges((2, 2), kernels_2x2, all_digits)
+    challenges_2x2 = generate_all_challenges((2, 2), transforms_2x2, max_challenges, output_dir, augment)
+
+def generate_bitdata_grade2(output_dir, max_challenges, augment):
+    # 1x5 challenges
+    transforms_1x5 = {
+        "IDENTITY": identity_transform,
+        "SHIFT_LEFT": shift_left_transform,
+        "SHIFT_RIGHT": shift_right_transform,
+        "FLIP_FIRST_BIT": lambda shape: flip_bit_transform(shape, 0),
+        "FLIP_SECOND_BIT": lambda shape: flip_bit_transform(shape, 1),
+        "FLIP_THIRD_BIT": lambda shape: flip_bit_transform(shape, 2),
+        "FLIP_FOURTH_BIT": lambda shape: flip_bit_transform(shape, 3),
+        "FLIP_FIFTH_BIT": lambda shape: flip_bit_transform(shape, 4),
+        "AND": and_transform,
+        "OR": or_transform,
+        "XOR": xor_transform,
+        "NOT": not_transform
+    }
+    challenges_1x5 = generate_all_challenges((1, 5), transforms_1x5, max_challenges, output_dir, augment)
     
-    save_challenges(challenges_1x3 + challenges_1x4 + challenges_2x2, output_dir)
-
-
-
-# Instead of directly using lambdas, define them with named functions for better traceability
-def flip_first_bit(shape): return flip_bit_kernel(shape, 0)
-flip_first_bit.__name__ = "flip_first_bit"
-
-def flip_second_bit(shape): return flip_bit_kernel(shape, 1)
-flip_second_bit.__name__ = "flip_second_bit"
-
-def flip_third_bit(shape): return flip_bit_kernel(shape, 2)
-flip_third_bit.__name__ = "flip_third_bit"
-
-def flip_fourth_bit(shape): return flip_bit_kernel(shape, 3)
-flip_fourth_bit.__name__ = "flip_fourth_bit"
+    # 1x6 challenges
+    transforms_1x6 = {
+        "IDENTITY": identity_transform,
+        "SHIFT_LEFT": shift_left_transform,
+        "SHIFT_RIGHT": shift_right_transform,
+        "FLIP_FIRST_BIT": lambda shape: flip_bit_transform(shape, 0),
+        "FLIP_SECOND_BIT": lambda shape: flip_bit_transform(shape, 1),
+        "FLIP_THIRD_BIT": lambda shape: flip_bit_transform(shape, 2),
+        "FLIP_FOURTH_BIT": lambda shape: flip_bit_transform(shape, 3),
+        "FLIP_FIFTH_BIT": lambda shape: flip_bit_transform(shape, 4),
+        "FLIP_SIXTH_BIT": lambda shape: flip_bit_transform(shape, 5),
+        "AND": and_transform,
+        "OR": or_transform,
+        "XOR": xor_transform,
+        "NOT": not_transform
+    }
+    challenges_1x6 = generate_all_challenges((1, 6), transforms_1x6, max_challenges, output_dir, augment)
+    
+    # 2x3 challenges
+    transforms_2x3 = {
+        "IDENTITY": identity_transform,
+        "ROTATE_90": rotate_90_transform,
+        "ROTATE_180": rotate_180_transform,
+        "ROTATE_270": rotate_270_transform,
+        "MIRROR": mirror_transform,
+        "MIRROR_ROTATE_90": mirror_rotate_90_transform,
+        "MIRROR_ROTATE_180": mirror_rotate_180_transform,
+        "MIRROR_ROTATE_270": mirror_rotate_270_transform,
+        "ROW_AND": row_and_transform,
+        "ROW_OR": row_or_transform,
+        "ROW_XOR": row_xor_transform,
+        "ROW_NOT": row_not_transform,
+        "COL_AND": col_and_transform,
+        "COL_OR": col_or_transform,
+        "COL_XOR": col_xor_transform,
+        "COL_NOT": col_not_transform
+    }
+    challenges_2x3 = generate_all_challenges((2, 3), transforms_2x3, max_challenges, output_dir, augment)
+    
+    # 3x3 challenges
+    transforms_3x3 = transforms_2x3  # Same transforms as 2x3
+    challenges_3x3 = generate_all_challenges((3, 3), transforms_3x3, max_challenges, output_dir, augment)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate bitdata challenges")
-    parser.add_argument("--all_digits", action="store_true", help="Use all digits (0-9) instead of just 0 and 1")
+    parser = argparse.ArgumentParser(description="Generate 1D-ARC challenges")
+    parser.add_argument("--augment", action="store_true", help="Use all digits (0-9) instead of just 0 and 1, and create augmented versions")
+    parser.add_argument("--max_challenges", type=int, default=100, help="Maximum number of challenges to generate")
     args = parser.parse_args()
 
-    print("Generating bitdata_kindergarten...")
-    generate_bitdata("kindergarten/datasets/kindergarten", args.all_digits)
+    output_dir = "arc-datasets/datasets/kindergarten2/data/training"
+    os.makedirs(output_dir, exist_ok=True)
+
+    print(f"Generating bitdata_kindergarten (max {args.max_challenges} challenges)...")
+    generate_bitdata(output_dir, args.max_challenges, args.augment)
     print("bitdata_kindergarten generated!")
     
-    print("Generating bitdata_grade1...")
-    generate_bitdata_grade1("kindergarten/datasets/kindergarten", args.all_digits)
+    print(f"Generating bitdata_grade1 (max {args.max_challenges} challenges)...")
+    generate_bitdata_grade1(output_dir, args.max_challenges, args.augment)
     print("bitdata_grade1 generated!")
+
+    print(f"Generating bitdata_grade2 (max {args.max_challenges} challenges)...")
+    generate_bitdata_grade2(output_dir, args.max_challenges, args.augment)
+    print("bitdata_grade2 generated!")
