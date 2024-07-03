@@ -18,7 +18,7 @@ from .data import (
     END_EXAMPLE_TOKEN,
 )
 from .model import model, device
-from .args import checkpoint_path, kindergarten
+from .args import checkpoint_path, kindergarten, use_refine
 
 
 def eval(checkpoint_path, device):
@@ -77,12 +77,13 @@ def eval(checkpoint_path, device):
             print("Output: ", output)
             print("Confidences: ", confidences)
             
-            # Perform refinement passes
-            num_refinement_passes = 2
-            for _ in range(num_refinement_passes):
-                output, confidences, _, _ = model.refine_predictions(src, output, confidences, position_encoder_dimensions)
+            if use_refine:
+                # Perform refinement passes
+                num_refinement_passes = 2
+                for _ in range(num_refinement_passes):
+                    output, confidences, _, _ = model.refine_predictions(src, output, confidences, position_encoder_dimensions)
 
-            _, predicted = torch.max(output.data, -1)
+                _, predicted = torch.max(output.data, -1)
 
 
             print("predicted before token removal:", predicted)

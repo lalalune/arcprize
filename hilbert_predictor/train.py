@@ -18,7 +18,7 @@ from .model import (
     dim_feedforward,
     device,
 )
-from .args import checkpoint_path, dropout_rate, batch_size, use_schedulefree, use_grokfast, use_wandb
+from .args import checkpoint_path, dropout_rate, batch_size, use_schedulefree, use_grokfast, use_wandb, use_refine
 from .data import (
     END_OUTPUT_MATRIX_TOKEN,
     NUM_TOKENS,
@@ -144,13 +144,15 @@ def train_step(
         global last_threshold
         last_threshold = threshold
         
-        # Refine predictions and collect confidence values
-        logits, confidences, refined_tokens, high_confidence_percentage = (
-            model.refine_predictions(
-                input_token, logits, confidences, dimensions, threshold=threshold
+        if use_refine:
+            logits, confidences, refined_tokens, high_confidence_percentage = (
+                model.refine_predictions(
+                    input_token, logits, confidences, dimensions, threshold=threshold
+                )
             )
-        )
-        confidence_history.append(high_confidence_percentage)
+            confidence_history.append(high_confidence_percentage)
+        else:
+            high_confidence_percentage = 0  # Set a default value when not using refinement
         
 
         # Collect confidence values for later averaging

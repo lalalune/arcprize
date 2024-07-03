@@ -45,6 +45,8 @@ if not is_running_under_pytest():
     parser.add_argument(
         "--grokfast", action="store_true", help="Use Grokfast optimization"
     )
+    parser.add_argument("--refine", action="store_true", help="Enable refinement network")
+
     print("Parser args: ", parser.parse_args())
 
     args = parser.parse_args()
@@ -59,6 +61,7 @@ if not is_running_under_pytest():
         "quadtree": args.quadtree,
         "schedulefree": args.schedulefree,
         "grokfast": args.grokfast,
+        "refine": args.refine,
     }
 else:
     args = {
@@ -82,3 +85,5 @@ use_hilbert = args.get('hilbert', False)
 use_quadtree = args.get('quadtree', False)
 use_schedulefree = args.get('schedulefree', False)
 use_grokfast = args.get('grokfast', False)
+use_refine = args.get('refine', False)
+
