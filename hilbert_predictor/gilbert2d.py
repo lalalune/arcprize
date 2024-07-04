@@ -6,6 +6,7 @@ from .encoder import NUM_ENCODING_DIMENSIONS, PositionEncoder
 from .args import hilbert, quadtree
 
 # Gilbert2D - Generalized Hilbert Curve for 2D space-filling
+# From https://github.com/jakubcerveny/gilbert
 def gilbert2d(width, height):
     """
     Generalized Hilbert ('gilbert') space-filling curve for arbitrary-sized
